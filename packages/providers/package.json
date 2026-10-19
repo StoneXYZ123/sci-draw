@@ -1,0 +1,27 @@
+{
+  "name": "@sci-draw/providers",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/potrace": "^2.1.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@e2b/code-interpreter": "^2.9.0",
+    "@sci-draw/schemas": "workspace:*",
+    "pdf-lib": "^1.17.1",
+    "potrace": "^2.1.8",
+    "pptxgenjs": "^4.0.1",
+    "sharp": "^0.35.5"
+  }
+}

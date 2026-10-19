@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --paper: #f3efe4;
+  --ink: #1c2a2e;
+  --muted: #5c6b70;
+  --line: #d5d0c4;
+  --accent: #0e6e68;
+  --accent-ink: #f7fffd;
+  --danger: #8d2f2f;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
