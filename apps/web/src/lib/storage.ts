@@ -4,7 +4,8 @@ import path from "node:path";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const UPLOAD_KEY = /^(?:ai-drawing-source|convert-source)\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}\.(png|jpeg|webp)$/;
+const UPLOAD_KEY =
+  /^(?:(?:ai-drawing-source|convert-source)\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}\.(?:png|jpeg|webp)|sci-vis-data\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}\.(?:csv|tsv|txt|xlsx|xls))$/;
 const RESULT_KEY = /^image-results\/[A-Za-z0-9_-]{1,128}\/[a-f0-9]{64}\/[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff)$/;
 const RESULT_EXTENSIONS = new Set(["png", "jpeg", "webp", "svg", "pptx", "pdf", "tiff"]);
 

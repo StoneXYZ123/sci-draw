@@ -48,3 +48,4 @@ jobs:
           node scripts/p0-smoke.mjs
           node scripts/p1-smoke.mjs
           node scripts/p2-smoke.mjs
+          node scripts/p3-smoke.mjs

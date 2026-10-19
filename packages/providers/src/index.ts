@@ -1,3 +1,9 @@
+export { resolveSciVisSandbox, renderSciVisChart } from "./sci-vis/runner";
+export type { SciVisEnv } from "./sci-vis/runner";
+export { parseTable, tableToCsv } from "./sci-vis/table";
+export { TableParseError } from "./sci-vis/table";
+export { SciVisEngineError } from "./sci-vis/types";
+export type { ChartArtifact, ChartRequest, SciVisEngine, SciVisSandbox } from "./sci-vis/types";
 export { createConvertProvider, resolveConvertProviderId } from "./convert/factory";
 export type { ConvertProviderEnv, ConvertProviderId } from "./convert/factory";
 export type { ConvertedFile, ConvertImageInput, ConvertProvider, RasterDpi, RasterFormat, SvgConvertMode } from "./convert/types";

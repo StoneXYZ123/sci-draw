@@ -11,7 +11,7 @@ const presignSchema = z.object({
   action: z.literal("presign"),
   purpose: z.enum(UPLOAD_PURPOSES),
   filename: z.string().trim().min(1).max(180),
-  contentType: z.string().trim().min(1).max(64),
+  contentType: z.string().trim().min(1).max(120),
   size: z.number().int().positive().optional(),
 });
 

@@ -59,6 +59,29 @@ export function convertCredits(charge: ConvertCharge): number {
   }
 }
 
+export const SCIVIS_CREDITS = {
+  generate: 10,
+  followUp: 10,
+  xlsx: 10,
+} as const;
+
+export type SciVisAction = "generate" | "follow-up" | "xlsx";
+
+export function sciVisCredits(action: SciVisAction): number {
+  switch (action) {
+    case "generate":
+      return SCIVIS_CREDITS.generate;
+    case "follow-up":
+      return SCIVIS_CREDITS.followUp;
+    case "xlsx":
+      return SCIVIS_CREDITS.xlsx;
+    default: {
+      const neverAction: never = action;
+      throw new Error(`Unhandled sci-vis charge ${String(neverAction)}`);
+    }
+  }
+}
+
 export const LEDGER_REASONS = {
   signupBonus: "signup_bonus",
   reserve: "ai_drawing.reserve",
@@ -67,6 +90,9 @@ export const LEDGER_REASONS = {
   convertReserve: "convert.reserve",
   convertConsume: "convert.consume",
   convertRollback: "convert.rollback",
+  sciVisReserve: "sci_vis.reserve",
+  sciVisConsume: "sci_vis.consume",
+  sciVisRollback: "sci_vis.rollback",
 } as const;
 
 export type LedgerReason = (typeof LEDGER_REASONS)[keyof typeof LEDGER_REASONS];

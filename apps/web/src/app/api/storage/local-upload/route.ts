@@ -28,7 +28,7 @@ export async function PUT(request: Request) {
       return jsonNoStore({ error: error.message }, error.status);
     }
     console.error("local upload failed", error instanceof Error ? error.message : "unknown");
-    return jsonNoStore({ error: "Could not store the image" }, 500);
+    return jsonNoStore({ error: "Could not store the upload" }, 500);
   }
   return jsonNoStore({ ok: true });
 }

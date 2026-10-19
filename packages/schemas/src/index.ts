@@ -159,6 +159,30 @@ export type FailedDrawingResult = {
   error: string;
 };
 
+export const SCI_VIS_CHART_TYPES = [
+  "line",
+  "bar",
+  "scatter",
+  "box",
+  "histogram",
+  "heatmap",
+  "violin",
+  "volcano",
+  "survival",
+  "dose-response",
+] as const;
+
+export const SCI_VIS_JOURNALS = ["none", "nature", "cell", "science", "lancet"] as const;
+export const SCI_VIS_PALETTES = ["default", "colorblind", "sequential", "diverging", "greyscale"] as const;
+export const SCI_VIS_WIDTHS = ["single", "medium", "double"] as const;
+export const SCI_VIS_LAYOUTS = ["single", "row", "grid"] as const;
+
+export type SciVisChartType = (typeof SCI_VIS_CHART_TYPES)[number];
+export type SciVisJournal = (typeof SCI_VIS_JOURNALS)[number];
+export type SciVisPalette = (typeof SCI_VIS_PALETTES)[number];
+export type SciVisWidth = (typeof SCI_VIS_WIDTHS)[number];
+export type SciVisLayout = (typeof SCI_VIS_LAYOUTS)[number];
+
 export type DrawingTaskResponse =
   | { id: string; status: "pending" | "running" }
   | { id: string; status: "completed"; result: CompletedDrawingResult }

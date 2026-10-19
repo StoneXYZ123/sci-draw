@@ -1,6 +1,6 @@
 # sci-draw
 
-科研插图工作台的 P0–P2：邮箱注册登录、积分账本、prompt / sketch / replicate 出图、对话列表，以及 SVG / PPTX 转换。
+科研插图工作台的 P0–P3：邮箱注册登录、积分账本、prompt / sketch / replicate 出图、对话列表、SVG / PPTX 转换，以及表格作图。
 
 界面和文案是重新写的，不使用 sci-draw.com 的标识、插画或页面结构。
 
@@ -22,6 +22,14 @@
 - 结果图：R2 环境变量齐全时上传到桶并返回 `CDN_PUBLIC_BASE` 上的 URL；否则写到本地，经 `/api/media/image-results/...` 提供
 - 源图：`POST /api/storage/direct-upload`，`purpose` 为 `ai-drawing-source`（出图）或 `convert-source`（转换），流程是 presign → PUT → complete。有 R2 时 PUT 到预签名地址；没有 R2 时 PUT 到带签名的 `/api/storage/local-upload`。只接受 PNG / JPEG / WebP，最大 5 MB。源图不走公开的结果图地址
 - 页面：`/ai-drawing` 与 `/zh/ai-drawing`，可用 `?mode=sketch` 或 `?mode=replicate`。左侧列出已完成的对话，可打开或删除。结果图上可以转成 SVG 或 PPTX
+- 表格作图：`/sci-vis` 与 `/zh/sci-vis`
+  - `POST /api/sci-vis/upload`，`purpose` 为 `sci-vis-data`，流程仍是 presign → PUT → complete。CSV / TSV / TXT / XLSX / XLS，最大 5 MB
+  - `POST /api/sci-vis/stream` 用 SSE（`data: {json}`）。顺序是 `status`、`session_ready`、`progress`、`preview`、`result`（`code`、`imageUrl`、`formats`、`engine`、`creditsConsumed`）、`complete`。失败时发 `failed` 并退回预留积分
+  - 这一版实际作图的是 CSV、TSV、TXT。XLSX / XLS 可以上传，发起 stream 时返回 400，不扣积分
+  - `POST /api/sci-vis/export-xlsx` 是占位，返回 **501** `NOT_IMPLEMENTED`，不扣积分
+  - 沙箱：有 `E2B_API_KEY` 时用 E2B；有 Modal 的 token 和 `SCIVIS_MODAL_ENDPOINT` 时用 Modal；否则在本机跑 matplotlib / seaborn。本机没有这些库时仍返回同一份脚本和一张占位图，`engine` 为 `mock`
+  - 调用方提交的 `currentCode` 只在 E2B 或 Modal 里执行。本机路径返回 `failed`，`errorCode` 为 `SANDBOX_REQUIRED`，积分退回。沙箱超时或脚本非 0 退出同样退回，不另收重试费
+  - 远程沙箱并且配置了 `GEMINI_API_KEY` 时，可以用 Gemini 改写脚本再执行。没有密钥时用内置模板
 - 转换（`CONVERT_PROVIDER=opensource`，这是默认值）：
   - `POST /api/convert-to-svg` 同步，`mode` 为 `text-only` 或 `full`，返回 `svgUrl` 与 `creditsConsumed`
   - `POST /api/convert-to-pptx` 同步，返回 `pptxUrl`
@@ -40,8 +48,10 @@
 | PPTX | 10 |
 | VSDX（未实现，不扣） | 表价 20 |
 | PNG、PDF、TIFF，300 / 600 / 1000 DPI | 5 / 10 / 15 |
+| SciVis 作图 / 接着改 | 10 / 10 |
+| SciVis 表格导出（未实现，不扣） | 表价 10 |
 
-转换同样先预留再确认，失败回滚。账本原因是 `convert.reserve`、`convert.consume`、`convert.rollback`。
+转换和表格作图都是先预留再确认，失败回滚。转换账本是 `convert.reserve`、`convert.consume`、`convert.rollback`。表格作图是 `sci_vis.reserve`、`sci_vis.consume`、`sci_vis.rollback`。
 
 任务在进程内执行。这一版没有接入 Inngest，VSDX 也只是进程内的占位记录。
 
@@ -58,7 +68,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-打开 <http://localhost:3000/ai-drawing>。注册后余额应为 20。提交一次 2K、张数 1 的 prompt 后余额变为 15，左侧出现这条对话。草图和复刻需要先选一张本地图片，再写补充说明。独立转换页在 <http://localhost:3000/convert>。
+打开 <http://localhost:3000/ai-drawing>。注册后余额应为 20。提交一次 2K、张数 1 的 prompt 后余额变为 15，左侧出现这条对话。草图和复刻需要先选一张本地图片，再写补充说明。独立转换页在 <http://localhost:3000/convert>。表格作图在 <http://localhost:3000/sci-vis>。
 
 不需要为源图上传增加新的环境变量。R2 相关变量留空时，源图和结果图都落在 `apps/web/.data`（或 `LOCAL_MEDIA_DIR`）。
 
@@ -100,11 +110,12 @@ node scripts/p2-smoke.mjs
 
 `scripts/p2-smoke.mjs` 检查匿名 401、VSDX 占位不扣费、已生成图片转 full SVG、`/convert` 用的 `convert-format`（text-only SVG、PPTX、300 DPI PNG），以及余额不足时的 402。
 
+`scripts/p3-smoke.mjs` 检查匿名 401、XLSX 上传后 stream 为 400 且不扣费、CSV 走 SSE 得到代码和 PNG、本机拒绝 `currentCode` 并退回积分、接着改再扣 10、表格导出 501，以及余额为 0 时的 402。
+
 ## 之后不做在这一版里的事
 
 | 阶段 | 内容 |
 |------|------|
-| P3 | SciVis 上传、SSE、Python 沙箱 |
-| P4 | Public API、VSDX 真实现、支付 |
+| P4 | Public API、VSDX 真实现、SciVis 表格导出、支付 |
 
 OAuth、像素级复刻现有产品界面，都不在范围内。

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aiDrawingCredits, convertCredits } from "./index";
+import { aiDrawingCredits, convertCredits, sciVisCredits } from "./index";
 
 test("2K times one costs 5 credits", () => {
   assert.equal(aiDrawingCredits("2K", 1), 5);
@@ -18,4 +18,10 @@ test("convert prices match the published table", () => {
   assert.equal(convertCredits({ kind: "raster", dpi: 300 }), 5);
   assert.equal(convertCredits({ kind: "raster", dpi: 600 }), 10);
   assert.equal(convertCredits({ kind: "raster", dpi: 1000 }), 15);
+});
+
+test("sci-vis actions cost 10 credits", () => {
+  assert.equal(sciVisCredits("generate"), 10);
+  assert.equal(sciVisCredits("follow-up"), 10);
+  assert.equal(sciVisCredits("xlsx"), 10);
 });

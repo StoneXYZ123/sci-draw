@@ -14,22 +14,30 @@ import {
 
 export const SOURCE_PURPOSE = "ai-drawing-source";
 export const CONVERT_PURPOSE = "convert-source";
-export const UPLOAD_PURPOSES = [SOURCE_PURPOSE, CONVERT_PURPOSE] as const;
+export const SCIVIS_PURPOSE = "sci-vis-data";
+export const UPLOAD_PURPOSES = [SOURCE_PURPOSE, CONVERT_PURPOSE, SCIVIS_PURPOSE] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 
 export function isUploadPurpose(value: string): value is UploadPurpose {
-  return value === SOURCE_PURPOSE || value === CONVERT_PURPOSE;
+  return value === SOURCE_PURPOSE || value === CONVERT_PURPOSE || value === SCIVIS_PURPOSE;
 }
 export const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const UPLOAD_TTL_MS = 10 * 60 * 1000;
 
-const CONTENT_TYPES = {
+const IMAGE_TYPES = {
   "image/png": "png",
   "image/jpeg": "jpeg",
   "image/webp": "webp",
 } as const;
 
-type SourceContentType = keyof typeof CONTENT_TYPES;
+const DATA_TYPES = {
+  "text/csv": "csv",
+  "application/csv": "csv",
+  "text/tab-separated-values": "tsv",
+  "text/plain": "txt",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-excel": "xls",
+} as const;
 
 export class UploadRequestError extends Error {
   constructor(
@@ -41,11 +49,32 @@ export class UploadRequestError extends Error {
   }
 }
 
-function extensionFor(contentType: string): (typeof CONTENT_TYPES)[SourceContentType] | null {
+function extensionFor(purpose: UploadPurpose, contentType: string): string | null {
+  if (purpose === SCIVIS_PURPOSE) {
+    if (
+      contentType === "text/csv" ||
+      contentType === "application/csv" ||
+      contentType === "text/tab-separated-values" ||
+      contentType === "text/plain" ||
+      contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      contentType === "application/vnd.ms-excel"
+    ) {
+      return DATA_TYPES[contentType];
+    }
+    return null;
+  }
   if (contentType === "image/png" || contentType === "image/jpeg" || contentType === "image/webp") {
-    return CONTENT_TYPES[contentType];
+    return IMAGE_TYPES[contentType];
   }
   return null;
+}
+
+function sizeMessage(purpose: UploadPurpose): string {
+  return purpose === SCIVIS_PURPOSE ? "File must be 5 MB or smaller" : "Image must be 5 MB or smaller";
+}
+
+function typeMessage(purpose: UploadPurpose): string {
+  return purpose === SCIVIS_PURPOSE ? "Use a CSV, TSV, TXT, XLSX, or XLS file" : "Use a PNG, JPEG, or WebP image";
 }
 
 function safeFilename(name: string): string {
@@ -113,6 +142,9 @@ function purposeFromKey(objectKey: string): UploadPurpose | null {
   if (objectKey.startsWith(`${CONVERT_PURPOSE}/`)) {
     return CONVERT_PURPOSE;
   }
+  if (objectKey.startsWith(`${SCIVIS_PURPOSE}/`)) {
+    return SCIVIS_PURPOSE;
+  }
   return null;
 }
 
@@ -132,12 +164,12 @@ export async function presignSourceUpload(input: {
   contentType: string;
   size?: number;
 }): Promise<{ uploadUrl: string; objectKey: string; headers: { "content-type": string } }> {
-  const extension = extensionFor(input.contentType);
+  const extension = extensionFor(input.purpose, input.contentType);
   if (!extension) {
-    throw new UploadRequestError("Use a PNG, JPEG, or WebP image", 400);
+    throw new UploadRequestError(typeMessage(input.purpose), 400);
   }
   if (input.size !== undefined && (!Number.isInteger(input.size) || input.size < 1 || input.size > MAX_SOURCE_BYTES)) {
-    throw new UploadRequestError("Image must be 5 MB or smaller", 400);
+    throw new UploadRequestError(sizeMessage(input.purpose), 400);
   }
   const owner = userIdSegment(input.userId);
   const objectKey = `${input.purpose}/${owner}/${randomUUID()}.${extension}`;
@@ -157,10 +189,11 @@ export async function presignSourceUpload(input: {
 }
 
 export async function writeLocalSource(objectKey: string, bytes: Uint8Array, contentType: string): Promise<void> {
+  const purposeForSize = purposeFromKey(objectKey) ?? SOURCE_PURPOSE;
   if (bytes.byteLength < 1 || bytes.byteLength > MAX_SOURCE_BYTES) {
-    throw new UploadRequestError("Image must be 5 MB or smaller", 400);
+    throw new UploadRequestError(sizeMessage(purposeForSize), 400);
   }
-  const extension = extensionFor(contentType);
+  const extension = extensionFor(purposeForSize, contentType);
   if (!extension || !objectKey.endsWith(`.${extension}`)) {
     throw new UploadRequestError("Content type does not match the upload", 400);
   }
@@ -199,7 +232,7 @@ export async function completeSourceUpload(userId: string, objectKey: string): P
   }
   if (bytes.byteLength > MAX_SOURCE_BYTES) {
     await deletePrivateObject(objectKey);
-    throw new UploadRequestError("Image must be 5 MB or smaller", 400);
+    throw new UploadRequestError(sizeMessage(purpose), 400);
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const updated = await getDb()
