@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { GenerateBodyError, parseGenerateBody } from "@sci-draw/schemas";
-import { createDrawingJob, InsufficientCreditsError, processDrawingJob, UnknownConversationError } from "@/lib/drawing-job";
+import { createDrawingJob, InsufficientCreditsError, processDrawingJob, SourceImageError, UnknownConversationError } from "@/lib/drawing-job";
 import { jsonNoStore } from "@/lib/http";
 import { takeRateLimit } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/session";
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     if (error instanceof GenerateBodyError) {
       return jsonNoStore({ error: error.message, errorCode: error.errorCode }, 400);
     }
-    if (error instanceof UnknownConversationError) {
+    if (error instanceof UnknownConversationError || error instanceof SourceImageError) {
       return jsonNoStore({ error: error.message, errorCode: error.errorCode }, 400);
     }
     if (error instanceof InsufficientCreditsError) {

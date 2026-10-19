@@ -49,8 +49,18 @@ export function createGeminiImageProvider(options: { apiKey: string; model: stri
         "Description:",
         input.prompt,
       ].join("\n");
+      const requestParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+      if (input.referenceImage) {
+        requestParts.push({
+          inlineData: {
+            mimeType: input.referenceImage.mimeType,
+            data: Buffer.from(input.referenceImage.bytes).toString("base64"),
+          },
+        });
+      }
+      requestParts.push({ text: prompt });
       const body = {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: [{ role: "user", parts: requestParts }],
         generationConfig: generationConfig(model, input),
       };
       let response: Response | null = null;

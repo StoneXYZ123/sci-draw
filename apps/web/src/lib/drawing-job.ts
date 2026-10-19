@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { aiDrawingCredits } from "@sci-draw/credits";
-import { createImageProvider } from "@sci-draw/providers";
-import type { CompletedDrawingResult, DrawingMessage, FailedDrawingResult, GenerateBody, PromptGenerateBody } from "@sci-draw/schemas";
+import { createImageProvider, type ImageGenerateInput } from "@sci-draw/providers";
+import { parseGenerateBody, type CompletedDrawingResult, type DrawingGenerateBody, type DrawingMessage, type FailedDrawingResult } from "@sci-draw/schemas";
 import { and, eq, sql } from "drizzle-orm";
-import { conversation, job, message } from "@/db/schema";
+import { conversation, job, message, uploadObject } from "@/db/schema";
 import { getDb } from "@/db";
 import { confirmCredits, ensureSignupBonus, InsufficientCreditsError, reserveCreditsTx, rollbackCredits } from "@/lib/credits";
+import { buildModelPrompt } from "@/lib/figure-hints";
 import { persistGeneratedImage } from "@/lib/storage";
+import { readReadySource, SOURCE_PURPOSE } from "@/lib/uploads";
 
 const STALE_MS = 6 * 60 * 1000;
 
@@ -21,7 +23,7 @@ function isUniqueViolation(error: unknown): boolean {
   return candidate.code === "23505" || candidate.cause?.code === "23505";
 }
 
-export async function createDrawingJob(userId: string, body: PromptGenerateBody): Promise<JobRow> {
+export async function createDrawingJob(userId: string, body: DrawingGenerateBody): Promise<JobRow> {
   await ensureSignupBonus(userId);
   const db = getDb();
   const cost = aiDrawingCredits(body.resolution, body.batchCount);
@@ -44,6 +46,23 @@ export async function createDrawingJob(userId: string, body: PromptGenerateBody)
           .limit(1);
         if (!owned) {
           throw new UnknownConversationError();
+        }
+      }
+      if (body.mode === "sketch" || body.mode === "replicate") {
+        const [source] = await tx
+          .select({ id: uploadObject.id })
+          .from(uploadObject)
+          .where(
+            and(
+              eq(uploadObject.objectKey, body.uploadedImageObjectKey),
+              eq(uploadObject.userId, userId),
+              eq(uploadObject.purpose, SOURCE_PURPOSE),
+              eq(uploadObject.status, "ready"),
+            ),
+          )
+          .limit(1);
+        if (!source) {
+          throw new SourceImageError();
         }
       }
       await tx.insert(job).values({
@@ -75,12 +94,34 @@ export async function createDrawingJob(userId: string, body: PromptGenerateBody)
   }
 }
 
-function asPromptBody(value: unknown): PromptGenerateBody {
-  const body = value as GenerateBody;
-  if (!body.prompt || body.mode !== "prompt") {
-    throw new Error("Stored job is not a prompt generation");
+function userFacingText(body: DrawingGenerateBody): string {
+  switch (body.mode) {
+    case "prompt":
+      return body.prompt;
+    case "sketch":
+    case "replicate":
+      return body.supplementaryPrompt;
+    default: {
+      const neverBody: never = body;
+      throw new Error(`Unhandled mode ${String(neverBody)}`);
+    }
   }
-  return body as PromptGenerateBody;
+}
+
+function userMetadata(body: DrawingGenerateBody): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    templateId: body.templateId,
+    styleId: body.styleId,
+    aspectRatio: body.aspectRatio,
+    mode: body.mode,
+    resolution: body.resolution,
+    batchId: body.batchId,
+    batchCount: body.batchCount,
+  };
+  if (body.mode === "sketch" || body.mode === "replicate") {
+    metadata.uploadedImageObjectKey = body.uploadedImageObjectKey;
+  }
+  return metadata;
 }
 
 function messageMetadata(value: Record<string, unknown>): string {
@@ -121,23 +162,32 @@ export async function processDrawingJob(jobId: string): Promise<void> {
     return;
   }
   try {
-    const body = asPromptBody(row.request);
+    const body = parseGenerateBody(row.request);
     const provider = createImageProvider({
       IMAGE_PROVIDER: process.env.IMAGE_PROVIDER,
       GEMINI_API_KEY: process.env.GEMINI_API_KEY,
       GEMINI_IMAGE_MODEL: process.env.GEMINI_IMAGE_MODEL,
     });
+    const text = userFacingText(body);
+    let referenceImage: ImageGenerateInput["referenceImage"] = undefined;
+    if (body.mode === "sketch" || body.mode === "replicate") {
+      referenceImage = await readReadySource(row.userId, body.uploadedImageObjectKey);
+    }
     const unit = aiDrawingCredits(body.resolution, 1);
     const images: Array<{ url: string; format: string; width: number; height: number; batchIndex: number }> = [];
     for (let batchIndex = 0; batchIndex < body.batchCount; batchIndex += 1) {
-      const prompt =
-        batchIndex === 0
-          ? body.prompt
-          : `${body.prompt}\n\nDraw a distinct variation ${batchIndex + 1} of ${body.batchCount}.`;
       const image = await provider.generate({
-        prompt,
+        prompt: buildModelPrompt({
+          mode: body.mode,
+          text,
+          templateId: body.templateId,
+          styleId: body.styleId,
+          batchIndex,
+          batchCount: body.batchCount,
+        }),
         aspectRatio: body.aspectRatio,
         resolution: body.resolution,
+        referenceImage,
       });
       const stored = await persistGeneratedImage({
         userId: row.userId,
@@ -163,9 +213,9 @@ export async function processDrawingJob(jobId: string): Promise<void> {
           id: conversationId,
           userId: row.userId,
           product: "ai_drawing",
-          mode: "prompt",
-          title: body.prompt.slice(0, 80),
-          initialPrompt: body.prompt,
+          mode: body.mode,
+          title: text.slice(0, 80),
+          initialPrompt: text,
           previewImageUrl: images[0]?.url,
           messageCount: 0,
         });
@@ -175,19 +225,11 @@ export async function processDrawingJob(jobId: string): Promise<void> {
       const userMessage: DrawingMessage = {
         id: userMessageId,
         role: "user",
-        content: body.prompt,
+        content: text,
         contentType: "text",
         conversationId,
         createdAt,
-        metadata: messageMetadata({
-          templateId: body.templateId,
-          styleId: body.styleId,
-          aspectRatio: body.aspectRatio,
-          mode: "prompt",
-          resolution: body.resolution,
-          batchId: body.batchId,
-          batchCount: body.batchCount,
-        }),
+        metadata: messageMetadata(userMetadata(body)),
       };
       await tx.insert(message).values({
         id: userMessage.id,
@@ -227,7 +269,7 @@ export async function processDrawingJob(jobId: string): Promise<void> {
           content: assistant.content,
           contentType: assistant.contentType,
           metadata: assistant.metadata,
-          createdAt: completedAt,
+          createdAt: new Date(completedAt.getTime() + image.batchIndex + 1),
         });
         results.push({
           batchId: body.batchId,
@@ -287,6 +329,15 @@ export async function recoverIfStale(row: JobRow): Promise<JobRow> {
   await failJob(row, new Error("Generation timed out"));
   const [fresh] = await getDb().select().from(job).where(eq(job.id, row.id)).limit(1);
   return fresh ?? row;
+}
+
+export class SourceImageError extends Error {
+  readonly errorCode = "SOURCE_IMAGE_NOT_READY" as const;
+
+  constructor() {
+    super("Source image is not ready");
+    this.name = "SourceImageError";
+  }
 }
 
 export class UnknownConversationError extends Error {

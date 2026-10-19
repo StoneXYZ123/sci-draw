@@ -4,6 +4,10 @@ export type ImageGenerateInput = {
   prompt: string;
   aspectRatio: string;
   resolution: ImageResolution;
+  referenceImage?: {
+    bytes: Uint8Array;
+    mimeType: string;
+  };
 };
 
 export type GeneratedImage = {

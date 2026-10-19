@@ -56,6 +56,14 @@ export type PromptGenerateBody = GenerateBody & {
   prompt: string;
 };
 
+export type ReferenceGenerateBody = GenerateBody & {
+  mode: "sketch" | "replicate";
+  supplementaryPrompt: string;
+  uploadedImageObjectKey: string;
+};
+
+export type DrawingGenerateBody = PromptGenerateBody | ReferenceGenerateBody;
+
 export class GenerateBodyError extends Error {
   constructor(
     message: string,
@@ -67,26 +75,49 @@ export class GenerateBodyError extends Error {
   }
 }
 
-export function parseGenerateBody(input: unknown): PromptGenerateBody {
+function withoutTemporaryConversation(body: GenerateBody): GenerateBody {
+  if (!body.conversationId?.startsWith("temp-")) {
+    return body;
+  }
+  const { conversationId: _ignored, ...rest } = body;
+  return rest;
+}
+
+export function parseGenerateBody(input: unknown): DrawingGenerateBody {
   const parsed = generateBodySchema.safeParse(input);
   if (!parsed.success) {
     throw new GenerateBodyError("Invalid request", "INVALID_REQUEST", parsed.error.flatten());
   }
-  const body = parsed.data;
-  if (body.mode !== "prompt") {
-    throw new GenerateBodyError(
-      "Only prompt mode is available in this release",
-      "MODE_NOT_AVAILABLE",
-    );
+  const body = withoutTemporaryConversation(parsed.data);
+  switch (body.mode) {
+    case "custom":
+      throw new GenerateBodyError("Custom mode is not available in this release", "MODE_NOT_AVAILABLE");
+    case "prompt": {
+      if (!body.prompt) {
+        throw new GenerateBodyError("prompt is required", "PROMPT_REQUIRED");
+      }
+      return { ...body, mode: "prompt", prompt: body.prompt };
+    }
+    case "sketch":
+    case "replicate": {
+      if (!body.supplementaryPrompt) {
+        throw new GenerateBodyError("supplementaryPrompt is required", "PROMPT_REQUIRED");
+      }
+      if (!body.uploadedImageObjectKey) {
+        throw new GenerateBodyError("uploadedImageObjectKey is required", "INVALID_REQUEST");
+      }
+      return {
+        ...body,
+        mode: body.mode,
+        supplementaryPrompt: body.supplementaryPrompt,
+        uploadedImageObjectKey: body.uploadedImageObjectKey,
+      };
+    }
+    default: {
+      const neverMode: never = body.mode;
+      throw new GenerateBodyError(`Unknown mode ${neverMode}`, "INVALID_REQUEST");
+    }
   }
-  if (!body.prompt) {
-    throw new GenerateBodyError("prompt is required", "PROMPT_REQUIRED");
-  }
-  if (body.conversationId?.startsWith("temp-")) {
-    const { conversationId: _ignored, ...rest } = body;
-    return { ...rest, mode: "prompt", prompt: body.prompt };
-  }
-  return { ...body, mode: "prompt", prompt: body.prompt };
 }
 
 export type DrawingMessage = {

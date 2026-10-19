@@ -30,9 +30,29 @@ test("parseGenerateBody drops temporary conversation ids", () => {
   assert.equal(body.batchCount, 1);
 });
 
-test("parseGenerateBody rejects sketch mode", () => {
+test("parseGenerateBody accepts sketch with a source image", () => {
+  const body = parseGenerateBody({
+    supplementaryPrompt: "keep the arrows",
+    uploadedImageObjectKey: "ai-drawing-source/user/file.png",
+    batchId: "optimistic-batch-3",
+    mode: "sketch",
+    batchCount: 2,
+  });
+  assert.equal(body.mode, "sketch");
+  assert.equal(body.mode === "sketch" ? body.supplementaryPrompt : "", "keep the arrows");
+  assert.equal(body.batchCount, 2);
+});
+
+test("parseGenerateBody requires a source image for replicate", () => {
   assert.throws(
-    () => parseGenerateBody({ prompt: "x", batchId: "b", mode: "sketch" }),
+    () => parseGenerateBody({ supplementaryPrompt: "match this", batchId: "b", mode: "replicate" }),
+    (error: unknown) => error instanceof GenerateBodyError && error.errorCode === "INVALID_REQUEST",
+  );
+});
+
+test("parseGenerateBody rejects custom mode", () => {
+  assert.throws(
+    () => parseGenerateBody({ prompt: "x", batchId: "b", mode: "custom" }),
     (error: unknown) => error instanceof GenerateBodyError && error.errorCode === "MODE_NOT_AVAILABLE",
   );
 });

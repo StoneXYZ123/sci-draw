@@ -9,6 +9,17 @@ test("missing gemini key selects the mock provider", () => {
   assert.equal(resolveImageProviderId({ IMAGE_PROVIDER: "gemini", GEMINI_API_KEY: "key" }), "gemini");
 });
 
+test("mock provider accepts a reference image", async () => {
+  const image = await createMockImageProvider().generate({
+    prompt: "sketch notes",
+    aspectRatio: "1:1",
+    resolution: "2K",
+    referenceImage: { bytes: Uint8Array.from([1, 2, 3, 4]), mimeType: "image/png" },
+  });
+  assert.equal(image.mimeType, "image/png");
+  assert.ok(image.bytes.byteLength > 8);
+});
+
 test("mock provider returns a png with readable dimensions", async () => {
   const image = await createMockImageProvider().generate({
     prompt: "mitochondria",

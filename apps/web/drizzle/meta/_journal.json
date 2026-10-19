@@ -8,6 +8,13 @@
       "when": 1792390830619,
       "tag": "0000_panoramic_blacklash",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792392476481,
+      "tag": "0001_low_bill_hollister",
+      "breakpoints": true
     }
   ]
 }

@@ -19,7 +19,8 @@ export function createMockImageProvider(): ImageProvider {
     id: "mock",
     async generate(input: ImageGenerateInput): Promise<GeneratedImage> {
       const size = previewSize(input.aspectRatio, input.resolution);
-      const label = `${input.resolution} ${input.aspectRatio}`;
+      const reference = input.referenceImage ? `REF${input.referenceImage.bytes.byteLength} ` : "";
+      const label = `${reference}${input.resolution} ${input.aspectRatio}`;
       const bytes = encodeDiagramPng({ ...size, label: `${label} ${input.prompt}` });
       return {
         bytes,

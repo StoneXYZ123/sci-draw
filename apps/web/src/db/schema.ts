@@ -115,6 +115,26 @@ export const message = pgTable(
   (table) => [index("message_conversation_id_idx").on(table.conversationId)],
 );
 
+export const uploadObject = pgTable(
+  "upload_object",
+  {
+    id: text("id").primaryKey(),
+    objectKey: text("object_key").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    purpose: text("purpose").notNull(),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull().default(0),
+    sha256: text("sha256"),
+    status: text("status").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("upload_object_user_id_idx").on(table.userId)],
+);
+
 export const job = pgTable(
   "job",
   {
