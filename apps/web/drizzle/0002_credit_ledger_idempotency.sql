@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "credit_ledger_ref_reason_uidx" ON "credit_ledger" USING btree ("ref_id","reason") WHERE "credit_ledger"."ref_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "credit_ledger_signup_bonus_uidx" ON "credit_ledger" USING btree ("user_id") WHERE "credit_ledger"."reason" = 'signup_bonus';

@@ -13,7 +13,8 @@
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "dependsOn": ["^test"]
+      "dependsOn": ["^test"],
+      "passThroughEnv": ["DATABASE_URL", "CREDITS_SIGNUP_BONUS"]
     }
   }
 }

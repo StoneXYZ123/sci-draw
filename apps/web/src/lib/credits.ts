@@ -3,6 +3,7 @@ import { LEDGER_REASONS, type LedgerReason } from "@sci-draw/credits";
 import { and, desc, eq } from "drizzle-orm";
 import { creditLedger, user } from "@/db/schema";
 import { getDb, type Database } from "@/db";
+import { isUniqueViolation } from "@/lib/pg-error";
 
 export class InsufficientCreditsError extends Error {
   readonly errorCode = "INSUFFICIENT_CREDITS" as const;
@@ -54,25 +55,37 @@ async function appendLedger(
   return balanceAfter;
 }
 
+async function ignoreUniqueConflict(work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+  }
+}
+
 export async function ensureSignupBonus(userId: string): Promise<void> {
   const db = getDb();
-  await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: creditLedger.id })
-      .from(creditLedger)
-      .where(and(eq(creditLedger.userId, userId), eq(creditLedger.reason, LEDGER_REASONS.signupBonus)))
-      .limit(1);
-    if (existing) {
-      return;
-    }
-    await appendLedger(tx, {
-      userId,
-      delta: signupBonusAmount(),
-      reason: LEDGER_REASONS.signupBonus,
-      refType: "user",
-      refId: userId,
-    });
-  });
+  await ignoreUniqueConflict(() =>
+    db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: creditLedger.id })
+        .from(creditLedger)
+        .where(and(eq(creditLedger.userId, userId), eq(creditLedger.reason, LEDGER_REASONS.signupBonus)))
+        .limit(1);
+      if (existing) {
+        return;
+      }
+      await appendLedger(tx, {
+        userId,
+        delta: signupBonusAmount(),
+        reason: LEDGER_REASONS.signupBonus,
+        refType: "user",
+        refId: userId,
+      });
+    }),
+  );
 }
 
 export type DbTransaction = Tx;
@@ -95,23 +108,25 @@ export async function reserveCreditsTx(
 
 export async function confirmCredits(userId: string, jobId: string, reason: LedgerReason = LEDGER_REASONS.consume): Promise<void> {
   const db = getDb();
-  await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: creditLedger.id })
-      .from(creditLedger)
-      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
-      .limit(1);
-    if (existing) {
-      return;
-    }
-    await appendLedger(tx, {
-      userId,
-      delta: 0,
-      reason,
-      refType: "job",
-      refId: jobId,
-    });
-  });
+  await ignoreUniqueConflict(() =>
+    db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: creditLedger.id })
+        .from(creditLedger)
+        .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
+        .limit(1);
+      if (existing) {
+        return;
+      }
+      await appendLedger(tx, {
+        userId,
+        delta: 0,
+        reason,
+        refType: "job",
+        refId: jobId,
+      });
+    }),
+  );
 }
 
 export async function rollbackCredits(
@@ -124,23 +139,25 @@ export async function rollbackCredits(
     return;
   }
   const db = getDb();
-  await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: creditLedger.id })
-      .from(creditLedger)
-      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
-      .limit(1);
-    if (existing) {
-      return;
-    }
-    await appendLedger(tx, {
-      userId,
-      delta: cost,
-      reason,
-      refType: "job",
-      refId: jobId,
-    });
-  });
+  await ignoreUniqueConflict(() =>
+    db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: creditLedger.id })
+        .from(creditLedger)
+        .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
+        .limit(1);
+      if (existing) {
+        return;
+      }
+      await appendLedger(tx, {
+        userId,
+        delta: cost,
+        reason,
+        refType: "job",
+        refId: jobId,
+      });
+    }),
+  );
 }
 
 export async function getBalance(userId: string): Promise<number> {

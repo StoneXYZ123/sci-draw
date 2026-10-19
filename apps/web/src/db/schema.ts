@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, index, boolean } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -77,7 +78,15 @@ export const creditLedger = pgTable(
     balanceAfter: integer("balance_after").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("credit_ledger_user_id_idx").on(table.userId)],
+  (table) => [
+    index("credit_ledger_user_id_idx").on(table.userId),
+    uniqueIndex("credit_ledger_ref_reason_uidx")
+      .on(table.refId, table.reason)
+      .where(sql`${table.refId} IS NOT NULL`),
+    uniqueIndex("credit_ledger_signup_bonus_uidx")
+      .on(table.userId)
+      .where(sql`${table.reason} = 'signup_bonus'`),
+  ],
 );
 
 export const conversation = pgTable(

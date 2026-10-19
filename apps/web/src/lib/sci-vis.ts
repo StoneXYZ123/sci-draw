@@ -14,6 +14,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { conversation, job, message } from "@/db/schema";
 import { getDb } from "@/db";
 import { confirmCredits, ensureSignupBonus, InsufficientCreditsError, reserveCreditsTx, rollbackCredits } from "@/lib/credits";
+import { claimJobCompleted, claimJobFailed } from "@/lib/job-claim";
+import { isUniqueViolation } from "@/lib/pg-error";
 import { persistUserFile } from "@/lib/storage";
 import { readReadyUpload, SCIVIS_PURPOSE } from "@/lib/uploads";
 
@@ -59,25 +61,6 @@ type Prepared = {
   sandbox: SciVisSandbox;
   request: SciVisRequest;
 };
-
-function uniqueViolation(error: unknown): boolean {
-  const pending: unknown[] = [error];
-  const seen = new Set<unknown>();
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (typeof current !== "object" || current === null || seen.has(current)) {
-      continue;
-    }
-    seen.add(current);
-    if ("code" in current && current.code === "23505") {
-      return true;
-    }
-    if ("cause" in current) {
-      pending.push(current.cause);
-    }
-  }
-  return false;
-}
 
 function spreadsheet(filename: string, contentType: string): boolean {
   const lower = filename.toLowerCase();
@@ -188,7 +171,7 @@ export async function prepareSciVis(userId: string, request: SciVisRequest): Pro
     if (error instanceof InsufficientCreditsError) {
       throw error;
     }
-    if (uniqueViolation(error)) {
+    if (isUniqueViolation(error)) {
       throw new SciVisConflictError("This request was already submitted");
     }
     throw error;
@@ -317,18 +300,16 @@ export function sciVisSseResponse(prepared: Prepared): Response {
           creditsConsumed: prepared.cost,
           chartState,
         });
+        const completed = await claimJobCompleted(prepared.jobId, {
+          result: { imageUrl: png.url, engine: chart.engine, formats, creditsConsumed: prepared.cost },
+          creditsConsumed: prepared.cost,
+        });
+        if (!completed) {
+          send({ type: "failed", error: "Could not chart the table", errorCode: "SCIVIS_FAILED" });
+          return;
+        }
         await confirmCredits(prepared.userId, prepared.jobId, LEDGER_REASONS.sciVisConsume);
         confirmed = true;
-        await getDb()
-          .update(job)
-          .set({
-            status: "completed",
-            result: { imageUrl: png.url, engine: chart.engine, formats, creditsConsumed: prepared.cost },
-            creditsConsumed: prepared.cost,
-            completedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(job.id, prepared.jobId));
         send({
           type: "result",
           imageUrl: png.url,
@@ -345,18 +326,15 @@ export function sciVisSseResponse(prepared: Prepared): Response {
         const errorCode = error instanceof SciVisEngineError ? error.errorCode : "SCIVIS_FAILED";
         const message = error instanceof SciVisEngineError ? error.message : "Could not chart the table";
         if (!confirmed) {
-          await rollbackCredits(prepared.userId, prepared.cost, prepared.jobId, LEDGER_REASONS.sciVisRollback).catch(() => undefined);
-          await getDb()
-            .update(job)
-            .set({
-              status: "failed",
-              errorCode,
-              errorMessage: message.slice(0, 300),
-              completedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(job.id, prepared.jobId))
-            .catch(() => undefined);
+          const claimed = await claimJobFailed(prepared.jobId, {
+            errorCode,
+            errorMessage: message.slice(0, 300),
+          }).catch(() => undefined);
+          if (claimed) {
+            await rollbackCredits(prepared.userId, prepared.cost, prepared.jobId, LEDGER_REASONS.sciVisRollback).catch(
+              () => undefined,
+            );
+          }
         }
         console.error("sci-vis stream failed", error instanceof Error ? error.message : "unknown");
         send({ type: "failed", error: message, errorCode });

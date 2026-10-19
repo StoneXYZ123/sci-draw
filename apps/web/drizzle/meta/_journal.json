@@ -15,6 +15,13 @@
       "when": 1792392476481,
       "tag": "0001_low_bill_hollister",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792403514273,
+      "tag": "0002_credit_ledger_idempotency",
+      "breakpoints": true
     }
   ]
 }

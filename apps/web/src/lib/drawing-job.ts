@@ -6,6 +6,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { conversation, job, message, uploadObject } from "@/db/schema";
 import { getDb } from "@/db";
 import { confirmCredits, ensureSignupBonus, InsufficientCreditsError, reserveCreditsTx, rollbackCredits } from "@/lib/credits";
+import { claimJobCompleted, claimJobFailed } from "@/lib/job-claim";
+import { isUniqueViolation } from "@/lib/pg-error";
 import { buildModelPrompt } from "@/lib/figure-hints";
 import { persistGeneratedImage } from "@/lib/storage";
 import { readReadySource, SOURCE_PURPOSE } from "@/lib/uploads";
@@ -16,11 +18,6 @@ type JobRow = typeof job.$inferSelect;
 
 function taskId(): string {
   return randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const candidate = error as { code?: string; cause?: { code?: string } };
-  return candidate.code === "23505" || candidate.cause?.code === "23505";
 }
 
 export async function createDrawingJob(userId: string, body: DrawingGenerateBody): Promise<JobRow> {
@@ -135,19 +132,15 @@ async function failJob(row: JobRow, error: unknown): Promise<void> {
     errorCode: "GENERATION_FAILED",
     error: messageText,
   };
-  await rollbackCredits(row.userId, row.creditsReserved, row.id);
-  await getDb()
-    .update(job)
-    .set({
-      status: "failed",
-      result,
-      errorCode: result.errorCode,
-      errorMessage: messageText,
-      creditsConsumed: 0,
-      updatedAt: new Date(),
-      completedAt: new Date(),
-    })
-    .where(eq(job.id, row.id));
+  const claimed = await claimJobFailed(row.id, {
+    errorCode: result.errorCode,
+    errorMessage: messageText,
+    result,
+  });
+  if (!claimed) {
+    return;
+  }
+  await rollbackCredits(claimed.userId, claimed.creditsReserved, claimed.id);
 }
 
 export async function processDrawingJob(jobId: string): Promise<void> {
@@ -303,17 +296,15 @@ export async function processDrawingJob(jobId: string): Promise<void> {
       };
       return payload;
     });
+    const claimed = await claimJobCompleted(row.id, {
+      result,
+      creditsConsumed: result.data.totalCreditsConsumed,
+      completedAt,
+    });
+    if (!claimed) {
+      return;
+    }
     await confirmCredits(row.userId, row.id);
-    await db
-      .update(job)
-      .set({
-        status: "completed",
-        result,
-        creditsConsumed: result.data.totalCreditsConsumed,
-        updatedAt: new Date(),
-        completedAt,
-      })
-      .where(eq(job.id, row.id));
   } catch (error) {
     await failJob(row, error);
   }

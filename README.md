@@ -53,7 +53,7 @@
 
 转换和表格作图都是先预留再确认，失败回滚。转换账本是 `convert.reserve`、`convert.consume`、`convert.rollback`。表格作图是 `sci_vis.reserve`、`sci_vis.consume`、`sci_vis.rollback`。
 
-任务在进程内执行。这一版没有接入 Inngest，VSDX 也只是进程内的占位记录。
+出图任务在进程内通过 `after()` 执行，限制见下文「已知限制」。VSDX 也只是进程内的占位记录。
 
 ## 本地启动
 
@@ -111,6 +111,13 @@ node scripts/p2-smoke.mjs
 `scripts/p2-smoke.mjs` 检查匿名 401、VSDX 占位不扣费、已生成图片转 full SVG、`/convert` 用的 `convert-format`（text-only SVG、PPTX、300 DPI PNG），以及余额不足时的 402。
 
 `scripts/p3-smoke.mjs` 检查匿名 401、XLSX 上传后 stream 为 400 且不扣费、CSV 走 SSE 得到代码和 PNG、本机拒绝 `currentCode` 并退回积分、接着改再扣 10、表格导出 501，以及余额为 0 时的 402。
+
+## 已知限制
+
+- 出图任务由 `POST /api/ai-drawing/generate` 里的 Next.js `after()` 在当前进程执行。进程退出、重新部署或崩溃后，任务不会继续，也没有跨实例的持久队列。
+- 轮询时，`running` 超过 6 分钟（`STALE_MS`）会走失败认领：只有 `UPDATE … WHERE status IN ('pending','running')` 抢到行，才会把任务标为 `failed` 并退回预留积分。成功路径先抢 `completed`（仅 `status = 'running'`），抢到之后才记消耗。SciVis 的 SSE 用同一套认领。
+- 积分账本对 `(ref_id, reason)` 在 `ref_id IS NOT NULL` 时唯一，注册赠送另有 `reason = 'signup_bonus'` 的用户唯一索引。并发确认、回滚或赠送撞上 Postgres `23505` 时当作已经记过，不再改余额。
+- 因此一次失败至多退一次，一次成功至多记一条消耗。这仍不是多实例、多地域的任务编排。付费生产前应按实现计划接入 Inngest 或等价队列；这一版不接入。
 
 ## 之后不做在这一版里的事
 
