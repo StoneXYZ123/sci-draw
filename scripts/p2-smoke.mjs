@@ -45,15 +45,25 @@ async function readJson(response) {
 }
 
 async function signup(label) {
-  const email = `p2-${label}-${Date.now()}@example.com`;
-  const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: jsonHeaders(),
-    body: JSON.stringify({ name: "P2 Tester", email, password: "password123" }),
-  });
-  const body = await readJson(response);
-  assert(response.ok, `sign-up failed ${response.status} ${JSON.stringify(body)}`);
-  return cookieHeader(response);
+  const started = Date.now();
+  let last = null;
+  while (Date.now() - started < 45_000) {
+    const email = `p2-${label}-${Date.now()}@example.com`;
+    const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: "P2 Tester", email, password: "password123" }),
+    });
+    const body = await readJson(response);
+    if (response.status === 429) {
+      last = body;
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      continue;
+    }
+    assert(response.ok, `sign-up failed ${response.status} ${JSON.stringify(body)}`);
+    return cookieHeader(response);
+  }
+  throw new Error(`sign-up stayed rate limited ${JSON.stringify(last)}`);
 }
 
 async function balance(cookie) {
