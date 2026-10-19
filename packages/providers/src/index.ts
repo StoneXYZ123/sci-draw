@@ -1,3 +1,6 @@
+export { createConvertProvider, resolveConvertProviderId } from "./convert/factory";
+export type { ConvertProviderEnv, ConvertProviderId } from "./convert/factory";
+export type { ConvertedFile, ConvertImageInput, ConvertProvider, RasterDpi, RasterFormat, SvgConvertMode } from "./convert/types";
 export { logicalImageSize, readImageSize } from "./image/dimensions";
 export { createImageProvider, resolveImageProviderId } from "./image/factory";
 export type { ImageProviderEnv } from "./image/factory";

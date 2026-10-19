@@ -6,13 +6,20 @@ import {
   appUrl,
   deletePrivateObject,
   isR2Configured,
-  isSourceObjectKey,
+  isUploadObjectKey,
   presignSourcePut,
   readPrivateObject,
   writePrivateObject,
 } from "@/lib/storage";
 
 export const SOURCE_PURPOSE = "ai-drawing-source";
+export const CONVERT_PURPOSE = "convert-source";
+export const UPLOAD_PURPOSES = [SOURCE_PURPOSE, CONVERT_PURPOSE] as const;
+export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+
+export function isUploadPurpose(value: string): value is UploadPurpose {
+  return value === SOURCE_PURPOSE || value === CONVERT_PURPOSE;
+}
 export const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const UPLOAD_TTL_MS = 10 * 60 * 1000;
 
@@ -85,7 +92,7 @@ export function verifyLocalUpload(input: {
   sig: string;
   contentType: string;
 }): boolean {
-  if (!isSourceObjectKey(input.objectKey)) {
+  if (!isUploadObjectKey(input.objectKey)) {
     return false;
   }
   if (!/^\d+$/.test(input.exp) || !/^[a-f0-9]{64}$/.test(input.sig)) {
@@ -99,17 +106,28 @@ export function verifyLocalUpload(input: {
   return signaturesMatch(signature(input.objectKey, exp, input.contentType), input.sig);
 }
 
-async function findOwned(userId: string, objectKey: string) {
+function purposeFromKey(objectKey: string): UploadPurpose | null {
+  if (objectKey.startsWith(`${SOURCE_PURPOSE}/`)) {
+    return SOURCE_PURPOSE;
+  }
+  if (objectKey.startsWith(`${CONVERT_PURPOSE}/`)) {
+    return CONVERT_PURPOSE;
+  }
+  return null;
+}
+
+async function findOwned(userId: string, objectKey: string, purpose: UploadPurpose) {
   const [row] = await getDb()
     .select()
     .from(uploadObject)
-    .where(and(eq(uploadObject.userId, userId), eq(uploadObject.objectKey, objectKey), eq(uploadObject.purpose, SOURCE_PURPOSE)))
+    .where(and(eq(uploadObject.userId, userId), eq(uploadObject.objectKey, objectKey), eq(uploadObject.purpose, purpose)))
     .limit(1);
   return row ?? null;
 }
 
 export async function presignSourceUpload(input: {
   userId: string;
+  purpose: UploadPurpose;
   filename: string;
   contentType: string;
   size?: number;
@@ -122,12 +140,12 @@ export async function presignSourceUpload(input: {
     throw new UploadRequestError("Image must be 5 MB or smaller", 400);
   }
   const owner = userIdSegment(input.userId);
-  const objectKey = `ai-drawing-source/${owner}/${randomUUID()}.${extension}`;
+  const objectKey = `${input.purpose}/${owner}/${randomUUID()}.${extension}`;
   await getDb().insert(uploadObject).values({
     id: randomUUID(),
     objectKey,
     userId: input.userId,
-    purpose: SOURCE_PURPOSE,
+    purpose: input.purpose,
     filename: safeFilename(input.filename),
     contentType: input.contentType,
     size: 0,
@@ -147,7 +165,8 @@ export async function writeLocalSource(objectKey: string, bytes: Uint8Array, con
     throw new UploadRequestError("Content type does not match the upload", 400);
   }
   const [row] = await getDb().select().from(uploadObject).where(eq(uploadObject.objectKey, objectKey)).limit(1);
-  if (!row || row.purpose !== SOURCE_PURPOSE) {
+  const purpose = purposeFromKey(objectKey);
+  if (!row || !purpose || row.purpose !== purpose) {
     throw new UploadRequestError("Upload was not found", 404);
   }
   if (row.status === "ready") {
@@ -163,10 +182,11 @@ export async function writeLocalSource(objectKey: string, bytes: Uint8Array, con
 }
 
 export async function completeSourceUpload(userId: string, objectKey: string): Promise<{ objectKey: string; status: "ready"; size: number; sha256: string }> {
-  if (!isSourceObjectKey(objectKey) || !objectKey.startsWith(`ai-drawing-source/${userId}/`)) {
+  const purpose = purposeFromKey(objectKey);
+  if (!purpose || !isUploadObjectKey(objectKey) || !objectKey.startsWith(`${purpose}/${userId}/`)) {
     throw new UploadRequestError("Upload was not found", 404);
   }
-  const row = await findOwned(userId, objectKey);
+  const row = await findOwned(userId, objectKey, purpose);
   if (!row) {
     throw new UploadRequestError("Upload was not found", 404);
   }
@@ -188,7 +208,7 @@ export async function completeSourceUpload(userId: string, objectKey: string): P
     .where(and(eq(uploadObject.id, row.id), eq(uploadObject.status, "pending")))
     .returning({ id: uploadObject.id });
   if (updated.length === 0) {
-    const current = await findOwned(userId, objectKey);
+    const current = await findOwned(userId, objectKey, purpose);
     if (current?.status === "ready" && current.sha256) {
       return { objectKey, status: "ready", size: current.size, sha256: current.sha256 };
     }
@@ -197,8 +217,12 @@ export async function completeSourceUpload(userId: string, objectKey: string): P
   return { objectKey, status: "ready", size: bytes.byteLength, sha256 };
 }
 
-export async function readReadySource(userId: string, objectKey: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
-  const row = await findOwned(userId, objectKey);
+export async function readReadyUpload(
+  userId: string,
+  objectKey: string,
+  purpose: UploadPurpose,
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const row = await findOwned(userId, objectKey, purpose);
   if (!row || row.status !== "ready") {
     throw new Error("Source image is missing");
   }
@@ -207,4 +231,8 @@ export async function readReadySource(userId: string, objectKey: string): Promis
     throw new Error("Source image is missing");
   }
   return { bytes, mimeType: row.contentType };
+}
+
+export async function readReadySource(userId: string, objectKey: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  return readReadyUpload(userId, objectKey, SOURCE_PURPOSE);
 }

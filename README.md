@@ -1,6 +1,6 @@
 # sci-draw
 
-科研插图工作台的 P0–P1：邮箱注册登录、积分账本、prompt / sketch / replicate 出图，以及对话列表。
+科研插图工作台的 P0–P2：邮箱注册登录、积分账本、prompt / sketch / replicate 出图、对话列表，以及 SVG / PPTX 转换。
 
 界面和文案是重新写的，不使用 sci-draw.com 的标识、插画或页面结构。
 
@@ -20,10 +20,30 @@
 - 2K 单价 5 积分，4K 单价 10，按 `batchCount` 相乘。入口先预留，成功再记一条消耗，失败则回滚。源图未就绪时直接 400，不预留积分
 - `ImageProvider`：配置了 `GEMINI_API_KEY` 时走 Gemini Flash Image（默认模型 `gemini-3.1-flash-image`），sketch / replicate 会把源图作为 `inlineData` 一并送出；没有密钥时用 mock，返回一张本地占位 PNG
 - 结果图：R2 环境变量齐全时上传到桶并返回 `CDN_PUBLIC_BASE` 上的 URL；否则写到本地，经 `/api/media/image-results/...` 提供
-- 源图：`POST /api/storage/direct-upload`，`purpose` 固定为 `ai-drawing-source`，流程是 presign → PUT → complete。有 R2 时 PUT 到预签名地址；没有 R2 时 PUT 到带签名的 `/api/storage/local-upload`。只接受 PNG / JPEG / WebP，最大 5 MB。源图不走公开的结果图地址
-- 页面：`/ai-drawing` 与 `/zh/ai-drawing`，可用 `?mode=sketch` 或 `?mode=replicate`。左侧列出已完成的对话，可打开或删除
+- 源图：`POST /api/storage/direct-upload`，`purpose` 为 `ai-drawing-source`（出图）或 `convert-source`（转换），流程是 presign → PUT → complete。有 R2 时 PUT 到预签名地址；没有 R2 时 PUT 到带签名的 `/api/storage/local-upload`。只接受 PNG / JPEG / WebP，最大 5 MB。源图不走公开的结果图地址
+- 页面：`/ai-drawing` 与 `/zh/ai-drawing`，可用 `?mode=sketch` 或 `?mode=replicate`。左侧列出已完成的对话，可打开或删除。结果图上可以转成 SVG 或 PPTX
+- 转换（`CONVERT_PROVIDER=opensource`，这是默认值）：
+  - `POST /api/convert-to-svg` 同步，`mode` 为 `text-only` 或 `full`，返回 `svgUrl` 与 `creditsConsumed`
+  - `POST /api/convert-to-pptx` 同步，返回 `pptxUrl`
+  - `POST /api/convert-format` 给 `/convert` 页使用：`objectKey`、`filename`、`format`（svg / pptx / png / pdf / tiff）、可选 `mode` 与 `dpi`，返回 `downloadUrl`
+  - `GET /api/download-image?url=` 只代理当前用户自己的结果文件，并带下载头
+  - `POST /api/convert-to-vsdx` 写入一条失败任务并返回 **202**；`GET ?jobId=` 轮询；`POST /api/convert-to-vsdx/complete` 返回 **501** `NOT_IMPLEMENTED`。这条路径不扣积分
+- 源图用途增加 `convert-source`，仍然走 presign → PUT → complete。没有 R2 时落到本地签名地址
+- 路径描摹用 potrace 的 JavaScript 移植（GPL-2.0）。`text-only` 是文字层占位，这一版没有接 OCR。PPTX 用 pptxgenjs。PNG / TIFF 用 sharp，PDF 把 sharp 产出的 PNG 包进单页 PDF
 
-任务在进程内于 202 返回之后执行，轮询时如果仍是 `pending` 也会再次拉起。P1 没有接入 Inngest，本地和 CI 都不需要队列进程。
+积分：
+
+| 操作 | 积分 |
+|------|------|
+| 绘图 2K / 4K，再乘张数 | 5 / 10 |
+| SVG text-only / full | 10 / 15 |
+| PPTX | 10 |
+| VSDX（未实现，不扣） | 表价 20 |
+| PNG、PDF、TIFF，300 / 600 / 1000 DPI | 5 / 10 / 15 |
+
+转换同样先预留再确认，失败回滚。账本原因是 `convert.reserve`、`convert.consume`、`convert.rollback`。
+
+任务在进程内执行。这一版没有接入 Inngest，VSDX 也只是进程内的占位记录。
 
 ## 本地启动
 
@@ -38,7 +58,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-打开 <http://localhost:3000/ai-drawing>。注册后余额应为 20。提交一次 2K、张数 1 的 prompt 后余额变为 15，左侧出现这条对话。草图和复刻需要先选一张本地图片，再写补充说明。
+打开 <http://localhost:3000/ai-drawing>。注册后余额应为 20。提交一次 2K、张数 1 的 prompt 后余额变为 15，左侧出现这条对话。草图和复刻需要先选一张本地图片，再写补充说明。独立转换页在 <http://localhost:3000/convert>。
 
 不需要为源图上传增加新的环境变量。R2 相关变量留空时，源图和结果图都落在 `apps/web/.data`（或 `LOCAL_MEDIA_DIR`）。
 
@@ -57,8 +77,8 @@ IMAGE_PROVIDER=mock
 ```
 apps/web                 Next.js 应用、Drizzle schema、API
 packages/schemas         generate / capabilities 的 zod
-packages/credits         2K=5、4K=10
-packages/providers       ImageProvider（gemini | mock）
+packages/credits         绘图与转换计价
+packages/providers       ImageProvider、ConvertProvider
 ```
 
 ## 验收脚本
@@ -75,14 +95,16 @@ node scripts/p0-smoke.mjs
 
 ```bash
 node scripts/p1-smoke.mjs
+node scripts/p2-smoke.mjs
 ```
+
+`scripts/p2-smoke.mjs` 检查匿名 401、VSDX 占位不扣费、已生成图片转 full SVG、`/convert` 用的 `convert-format`（text-only SVG、PPTX、300 DPI PNG），以及余额不足时的 402。
 
 ## 之后不做在这一版里的事
 
 | 阶段 | 内容 |
 |------|------|
-| P2 | SVG / PPTX 转换、`/convert`、光栅导出；VSDX 仍可只留队列占位 |
 | P3 | SciVis 上传、SSE、Python 沙箱 |
-| P4 | Public API、证书、支付 |
+| P4 | Public API、VSDX 真实现、支付 |
 
 OAuth、像素级复刻现有产品界面，都不在范围内。

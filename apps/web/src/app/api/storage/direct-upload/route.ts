@@ -2,14 +2,14 @@ import { z } from "zod";
 import { jsonNoStore } from "@/lib/http";
 import { takeRateLimit } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/session";
-import { completeSourceUpload, presignSourceUpload, SOURCE_PURPOSE, UploadRequestError } from "@/lib/uploads";
+import { completeSourceUpload, presignSourceUpload, UPLOAD_PURPOSES, UploadRequestError } from "@/lib/uploads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const presignSchema = z.object({
   action: z.literal("presign"),
-  purpose: z.literal(SOURCE_PURPOSE),
+  purpose: z.enum(UPLOAD_PURPOSES),
   filename: z.string().trim().min(1).max(180),
   contentType: z.string().trim().min(1).max(64),
   size: z.number().int().positive().optional(),
@@ -17,7 +17,7 @@ const presignSchema = z.object({
 
 const completeSchema = z.object({
   action: z.literal("complete"),
-  purpose: z.literal(SOURCE_PURPOSE),
+  purpose: z.enum(UPLOAD_PURPOSES),
   objectKey: z.string().trim().min(1).max(512),
 });
 
@@ -47,12 +47,16 @@ export async function POST(request: Request) {
         return jsonNoStore(
           await presignSourceUpload({
             userId: sessionUser.id,
+            purpose: parsed.data.purpose,
             filename: parsed.data.filename,
             contentType: parsed.data.contentType,
             size: parsed.data.size,
           }),
         );
       case "complete":
+        if (!parsed.data.objectKey.startsWith(`${parsed.data.purpose}/`)) {
+          return jsonNoStore({ error: "Upload was not found" }, 404);
+        }
         return jsonNoStore(await completeSourceUpload(sessionUser.id, parsed.data.objectKey));
       default: {
         const neverAction: never = parsed.data;

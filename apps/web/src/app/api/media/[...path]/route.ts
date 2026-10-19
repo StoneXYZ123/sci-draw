@@ -7,13 +7,17 @@ export const dynamic = "force-dynamic";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 const HASH_SEGMENT = /^[a-f0-9]{64}$/;
-const FILE_SEGMENT = /^[0-9a-f-]{36}\.(png|jpe?g|webp)$/;
+const FILE_SEGMENT = /^[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff)$/;
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   webp: "image/webp",
+  svg: "image/svg+xml",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pdf: "application/pdf",
+  tiff: "image/tiff",
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ path: string[] }> }) {

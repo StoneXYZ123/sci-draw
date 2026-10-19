@@ -96,6 +96,11 @@ const copy = {
     fileHint: "PNG, JPEG, or WebP, up to 5 MB",
     fileMissing: "Choose a source image",
     fileLarge: "Image must be 5 MB or smaller",
+    convert: "Convert",
+    svgText: "SVG text · 10",
+    svgFull: "SVG paths · 15",
+    pptx: "PPTX · 10",
+    download: "Download",
   },
   zh: {
     title: "插图工作台",
@@ -130,6 +135,11 @@ const copy = {
     fileHint: "PNG、JPEG 或 WebP，最大 5 MB",
     fileMissing: "请选择源图",
     fileLarge: "图片不能超过 5 MB",
+    convert: "转换",
+    svgText: "SVG 文字 · 10",
+    svgFull: "SVG 路径 · 15",
+    pptx: "PPTX · 10",
+    download: "下载",
   },
 } as const;
 
@@ -237,6 +247,8 @@ export function AiDrawingStudio({ locale, initialMode }: { locale: Locale; initi
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [spent, setSpent] = useState<number | null>(null);
+  const [downloads, setDownloads] = useState<Record<string, string>>({});
+  const [convertBusy, setConvertBusy] = useState<string | null>(null);
 
   async function refreshMe() {
     const response = await fetch("/api/me", { cache: "no-store" });
@@ -397,6 +409,34 @@ export function AiDrawingStudio({ locale, initialMode }: { locale: Locale; initi
       setPhase("failed");
       setDraft(null);
       setError(caught instanceof Error ? caught.message : text.failed);
+    }
+  }
+
+  async function onConvert(imageUrl: string, kind: "svg-text" | "svg-full" | "pptx") {
+    const key = `${imageUrl}:${kind}`;
+    setConvertBusy(key);
+    setError(null);
+    try {
+      const response = await fetch(kind === "pptx" ? "/api/convert-to-pptx" : "/api/convert-to-svg", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(kind === "pptx" ? { imageUrl } : { imageUrl, mode: kind === "svg-text" ? "text-only" : "full" }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok || !isRecord(body)) {
+        const message = isRecord(body) && typeof body.error === "string" ? body.error : text.failed;
+        throw new Error(message);
+      }
+      const url = kind === "pptx" ? body.pptxUrl : body.svgUrl;
+      if (typeof url !== "string") {
+        throw new Error(text.failed);
+      }
+      setDownloads((current) => ({ ...current, [key]: url }));
+      await refreshMe();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text.failed);
+    } finally {
+      setConvertBusy(null);
     }
   }
 
@@ -590,6 +630,34 @@ export function AiDrawingStudio({ locale, initialMode }: { locale: Locale; initi
                   <figure key={item.id} className="space-y-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={imageUrl} alt={text.result} className="w-full border border-[var(--line)] bg-white" />
+                    <figcaption className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-[var(--muted)]">{text.convert}</span>
+                      {(
+                        [
+                          ["svg-text", text.svgText],
+                          ["svg-full", text.svgFull],
+                          ["pptx", text.pptx],
+                        ] as const
+                      ).map(([kind, label]) => {
+                        const key = `${imageUrl}:${kind}`;
+                        const href = downloads[key];
+                        return href ? (
+                          <a key={kind} href={`/api/download-image?url=${encodeURIComponent(href)}`} className="border border-[var(--line)] bg-white px-2 py-1">
+                            {text.download} {label}
+                          </a>
+                        ) : (
+                          <button
+                            key={kind}
+                            type="button"
+                            disabled={convertBusy !== null}
+                            onClick={() => void onConvert(imageUrl, kind)}
+                            className="border border-[var(--line)] bg-white px-2 py-1 disabled:opacity-60"
+                          >
+                            {convertBusy === key ? "…" : label}
+                          </button>
+                        );
+                      })}
+                    </figcaption>
                   </figure>
                 );
               }

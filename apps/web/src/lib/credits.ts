@@ -77,23 +77,29 @@ export async function ensureSignupBonus(userId: string): Promise<void> {
 
 export type DbTransaction = Tx;
 
-export async function reserveCreditsTx(tx: DbTransaction, userId: string, cost: number, jobId: string): Promise<number> {
+export async function reserveCreditsTx(
+  tx: DbTransaction,
+  userId: string,
+  cost: number,
+  jobId: string,
+  reason: LedgerReason = LEDGER_REASONS.reserve,
+): Promise<number> {
   return appendLedger(tx, {
     userId,
     delta: -cost,
-    reason: LEDGER_REASONS.reserve,
+    reason,
     refType: "job",
     refId: jobId,
   });
 }
 
-export async function confirmCredits(userId: string, jobId: string): Promise<void> {
+export async function confirmCredits(userId: string, jobId: string, reason: LedgerReason = LEDGER_REASONS.consume): Promise<void> {
   const db = getDb();
   await db.transaction(async (tx) => {
     const [existing] = await tx
       .select({ id: creditLedger.id })
       .from(creditLedger)
-      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, LEDGER_REASONS.consume)))
+      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
       .limit(1);
     if (existing) {
       return;
@@ -101,14 +107,19 @@ export async function confirmCredits(userId: string, jobId: string): Promise<voi
     await appendLedger(tx, {
       userId,
       delta: 0,
-      reason: LEDGER_REASONS.consume,
+      reason,
       refType: "job",
       refId: jobId,
     });
   });
 }
 
-export async function rollbackCredits(userId: string, cost: number, jobId: string): Promise<void> {
+export async function rollbackCredits(
+  userId: string,
+  cost: number,
+  jobId: string,
+  reason: LedgerReason = LEDGER_REASONS.rollback,
+): Promise<void> {
   if (cost <= 0) {
     return;
   }
@@ -117,7 +128,7 @@ export async function rollbackCredits(userId: string, cost: number, jobId: strin
     const [existing] = await tx
       .select({ id: creditLedger.id })
       .from(creditLedger)
-      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, LEDGER_REASONS.rollback)))
+      .where(and(eq(creditLedger.refId, jobId), eq(creditLedger.reason, reason)))
       .limit(1);
     if (existing) {
       return;
@@ -125,7 +136,7 @@ export async function rollbackCredits(userId: string, cost: number, jobId: strin
     await appendLedger(tx, {
       userId,
       delta: cost,
-      reason: LEDGER_REASONS.rollback,
+      reason,
       refType: "job",
       refId: jobId,
     });

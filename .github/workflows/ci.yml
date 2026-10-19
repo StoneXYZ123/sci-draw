@@ -47,3 +47,4 @@ jobs:
           nohup pnpm --filter web start > /tmp/web.log 2>&1 &
           node scripts/p0-smoke.mjs
           node scripts/p1-smoke.mjs
+          node scripts/p2-smoke.mjs
