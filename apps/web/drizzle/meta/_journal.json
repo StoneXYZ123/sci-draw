@@ -22,6 +22,13 @@
       "when": 1792403514273,
       "tag": "0002_credit_ledger_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792411200000,
+      "tag": "0003_api_keys",
+      "breakpoints": true
     }
   ]
 }

@@ -143,8 +143,16 @@ async function failJob(row: JobRow, error: unknown): Promise<void> {
   await rollbackCredits(claimed.userId, claimed.creditsReserved, claimed.id);
 }
 
+function isPublicDrawingBatch(batchId: string): boolean {
+  return batchId.startsWith("v1gen-") || batchId.startsWith("v1edit-");
+}
+
 export async function processDrawingJob(jobId: string): Promise<void> {
   const db = getDb();
+  const [existing] = await db.select({ type: job.type }).from(job).where(eq(job.id, jobId)).limit(1);
+  if (!existing || existing.type !== "generate") {
+    return;
+  }
   const claimed = await db
     .update(job)
     .set({ status: "running", updatedAt: new Date() })
@@ -194,6 +202,73 @@ export async function processDrawingJob(jobId: string): Promise<void> {
         height: image.height,
         batchIndex,
       });
+    }
+    if (isPublicDrawingBatch(body.batchId)) {
+      const completedAt = new Date();
+      const createdAt = completedAt.toISOString();
+      const conversationId = "";
+      const userMessage: DrawingMessage = {
+        id: randomUUID(),
+        role: "user",
+        content: text,
+        contentType: "text",
+        conversationId,
+        createdAt,
+        metadata: messageMetadata(userMetadata(body)),
+      };
+      const results = images.map((image) => {
+        const assistant: DrawingMessage = {
+          id: randomUUID(),
+          role: "assistant",
+          content: "",
+          contentType: "image",
+          conversationId,
+          createdAt,
+          metadata: messageMetadata({
+            imageUrl: image.url,
+            creditsConsumed: unit,
+            resolution: body.resolution,
+            width: image.width,
+            height: image.height,
+            format: image.format,
+            batchId: body.batchId,
+            batchCount: body.batchCount,
+            batchIndex: image.batchIndex,
+            completedAt: createdAt,
+          }),
+        };
+        return {
+          batchId: body.batchId,
+          batchIndex: image.batchIndex,
+          success: true as const,
+          imageUrl: image.url,
+          completedAt: createdAt,
+          creditsConsumed: unit,
+          assistantMessage: assistant,
+        };
+      });
+      const payload: CompletedDrawingResult = {
+        success: true,
+        data: {
+          conversationId,
+          isNewConversation: false,
+          successCount: results.length,
+          failureCount: 0,
+          totalCreditsConsumed: unit * results.length,
+          userMessage,
+          results,
+        },
+      };
+      const claimedPublic = await claimJobCompleted(row.id, {
+        result: payload,
+        creditsConsumed: payload.data.totalCreditsConsumed,
+        completedAt,
+      });
+      if (!claimedPublic) {
+        return;
+      }
+      await confirmCredits(row.userId, row.id);
+      return;
     }
     const completedAt = new Date();
     const result = await db.transaction(async (tx) => {
@@ -311,7 +386,7 @@ export async function processDrawingJob(jobId: string): Promise<void> {
 }
 
 export async function recoverIfStale(row: JobRow): Promise<JobRow> {
-  if (row.status !== "running" || !row.updatedAt) {
+  if (row.type !== "generate" || row.status !== "running" || !row.updatedAt) {
     return row;
   }
   if (Date.now() - row.updatedAt.getTime() < STALE_MS) {

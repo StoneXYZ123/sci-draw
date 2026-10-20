@@ -20,7 +20,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return jsonNoStore({ error: "Not found" }, 404);
   }
   const [found] = await getDb().select().from(job).where(eq(job.id, id)).limit(1);
-  if (!found || found.userId !== sessionUser.id) {
+  if (!found || found.userId !== sessionUser.id || found.type !== "generate") {
     return jsonNoStore({ error: "Not found" }, 404);
   }
   const row = await recoverIfStale(found);

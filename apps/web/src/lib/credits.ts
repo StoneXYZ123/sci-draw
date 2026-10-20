@@ -160,6 +160,48 @@ export async function rollbackCredits(
   );
 }
 
+export async function grantCredits(
+  userId: string,
+  amount: number,
+  reason: LedgerReason,
+  refId: string,
+  refType: string,
+): Promise<"applied" | "duplicate"> {
+  if (!Number.isInteger(amount) || amount <= 0) {
+    throw new Error("Credit grant must be a positive integer");
+  }
+  if (!refId) {
+    throw new Error("Credit grant needs a ref id");
+  }
+  try {
+    let outcome: "applied" | "duplicate" = "applied";
+    await getDb().transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: creditLedger.id })
+        .from(creditLedger)
+        .where(and(eq(creditLedger.refId, refId), eq(creditLedger.reason, reason)))
+        .limit(1);
+      if (existing) {
+        outcome = "duplicate";
+        return;
+      }
+      await appendLedger(tx, {
+        userId,
+        delta: amount,
+        reason,
+        refType,
+        refId,
+      });
+    });
+    return outcome;
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return "duplicate";
+    }
+    throw error;
+  }
+}
+
 export async function getBalance(userId: string): Promise<number> {
   const [row] = await getDb().select({ creditsBalance: user.creditsBalance }).from(user).where(eq(user.id, userId)).limit(1);
   return row?.creditsBalance ?? 0;

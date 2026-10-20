@@ -93,6 +93,7 @@ export const LEDGER_REASONS = {
   sciVisReserve: "sci_vis.reserve",
   sciVisConsume: "sci_vis.consume",
   sciVisRollback: "sci_vis.rollback",
+  purchaseStripe: "purchase.stripe",
 } as const;
 
 export type LedgerReason = (typeof LEDGER_REASONS)[keyof typeof LEDGER_REASONS];

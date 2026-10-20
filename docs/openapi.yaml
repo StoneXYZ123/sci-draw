@@ -1,0 +1,242 @@
+openapi: 3.0.3
+info:
+  title: sci-draw API
+  version: 0.4.0
+  description: |
+    HTTP API for figure generation, image conversion, and table charts.
+    Authenticate with `Authorization: Bearer sd_...`. Responses use snake_case.
+    Chart results do not include Python source.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/v1/credits:
+    get:
+      summary: Read the credit balance
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current balance
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balance]
+                properties:
+                  balance:
+                    type: integer
+        "401":
+          description: Missing or revoked key
+  /api/v1/images/generations:
+    post:
+      summary: Start an image generation job
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                aspect_ratio:
+                  type: string
+                  default: "4:3"
+                resolution:
+                  type: string
+                  enum: ["2K", "4K"]
+                  default: "2K"
+                count:
+                  type: integer
+                  minimum: 1
+                  maximum: 4
+                  default: 1
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "402":
+          description: Not enough credits
+  /api/v1/images/edits:
+    post:
+      summary: Start an image edit job
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image, prompt]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                prompt:
+                  type: string
+                aspect_ratio:
+                  type: string
+                resolution:
+                  type: string
+                count:
+                  type: integer
+      responses:
+        "202":
+          description: Job queued
+  /api/v1/images/conversions:
+    post:
+      summary: Convert an image
+      description: |
+        `Prefer: wait` runs the short conversion in the request.
+        `format=vsdx` needs `CONVERT_VSDX_PROVIDER`. Without it the route returns 501 and does not charge.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - in: header
+          name: Prefer
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image, format]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                format:
+                  type: string
+                  enum: [svg, pptx, png, pdf, tiff, vsdx]
+                vector_mode:
+                  type: string
+                  enum: [text-only, full]
+                dpi:
+                  type: integer
+                  enum: [300, 600, 1000]
+      responses:
+        "200":
+          description: Finished job when Prefer wait completed
+        "202":
+          description: Job queued
+        "501":
+          description: VSDX provider is not configured
+  /api/v1/charts/generations:
+    post:
+      summary: Chart a CSV table
+      description: The job result contains image files only. Python source is not returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: string
+                  format: binary
+                chart_type:
+                  type: string
+                journal_style:
+                  type: string
+                figure_width:
+                  type: string
+                color_palette:
+                  type: string
+                multi_chart_layout:
+                  type: string
+                file_context:
+                  type: string
+      responses:
+        "202":
+          description: Job queued
+  /api/v1/jobs/{job_id}:
+    get:
+      summary: Read a job
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Unknown job
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      schema:
+        type: string
+  schemas:
+    Job:
+      type: object
+      required: [id, object, type, status, credits_reserved, credits_consumed]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          enum: [job]
+        type:
+          type: string
+        status:
+          type: string
+          enum: [queued, processing, succeeded, failed, canceled]
+        credits_reserved:
+          type: integer
+        credits_consumed:
+          type: integer
+        result:
+          type: object
+          nullable: true
+          properties:
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  url:
+                    type: string
+                  format:
+                    type: string
+        error:
+          type: object
+          nullable: true
+          properties:
+            code:
+              type: string
+            message:
+              type: string

@@ -10,6 +10,7 @@ import {
   presignSourcePut,
   readPrivateObject,
   writePrivateObject,
+  writeUploadBytes,
 } from "@/lib/storage";
 
 export const SOURCE_PURPOSE = "ai-drawing-source";
@@ -248,6 +249,38 @@ export async function completeSourceUpload(userId: string, objectKey: string): P
     throw new UploadRequestError("Upload is incomplete", 400);
   }
   return { objectKey, status: "ready", size: bytes.byteLength, sha256 };
+}
+
+export async function storeReadyUpload(input: {
+  userId: string;
+  purpose: UploadPurpose;
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+}): Promise<string> {
+  if (input.bytes.byteLength < 1 || input.bytes.byteLength > MAX_SOURCE_BYTES) {
+    throw new UploadRequestError(sizeMessage(input.purpose), 400);
+  }
+  const extension = extensionFor(input.purpose, input.contentType);
+  if (!extension) {
+    throw new UploadRequestError(typeMessage(input.purpose), 400);
+  }
+  const owner = userIdSegment(input.userId);
+  const objectKey = `${input.purpose}/${owner}/${randomUUID()}.${extension}`;
+  await writeUploadBytes(objectKey, input.bytes, input.contentType);
+  const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+  await getDb().insert(uploadObject).values({
+    id: randomUUID(),
+    objectKey,
+    userId: input.userId,
+    purpose: input.purpose,
+    filename: safeFilename(input.filename),
+    contentType: input.contentType,
+    size: input.bytes.byteLength,
+    sha256,
+    status: "ready",
+  });
+  return objectKey;
 }
 
 export async function readReadyUpload(
