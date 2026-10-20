@@ -23,7 +23,7 @@ type ResultEvent = {
 const COPY = {
   en: {
     title: "Chart a table",
-    lead: "Upload a CSV, TSV, or TXT table. This page returns Python and a chart. XLSX and XLS can be stored; plotting them is not in this release, and spreadsheet export is not available.",
+    lead: "Upload a CSV, TSV, or TXT table. This page returns Python and a chart. XLSX and XLS can be stored; plotting them is not in this release. A finished chart can be exported as an editable spreadsheet for 10 credits.",
     credits: "Credits",
     file: "Table",
     chart: "Chart",
@@ -48,7 +48,7 @@ const COPY = {
   },
   zh: {
     title: "用表格画图",
-    lead: "上传 CSV、TSV 或 TXT。页面会返回 Python 和一张图。XLSX 与 XLS 可以先存起来，这一版不拿它们作图，也不导出表格。",
+    lead: "上传 CSV、TSV 或 TXT。页面会返回 Python 和一张图。XLSX 与 XLS 可以先存起来，这一版不拿它们作图。画完可以花 10 积分导出可编辑表格。",
     credits: "积分",
     file: "表格",
     chart: "图型",
@@ -187,6 +187,7 @@ export function SciVisBench({
   const [followUp, setFollowUp] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [result, setResult] = useState<ResultEvent | null>(null);
 
@@ -287,8 +288,15 @@ export function SciVisBench({
       body: JSON.stringify({ generationId: result.generationId }),
     });
     const body: unknown = await response.json().catch(() => null);
-    const message = isRecord(body) && typeof body.error === "string" ? body.error : text.failed;
-    setError(message);
+    if (!response.ok || !isRecord(body) || typeof body.xlsxUrl !== "string") {
+      const message = isRecord(body) && typeof body.error === "string" ? body.error : text.failed;
+      setError(message);
+      return;
+    }
+    setExportUrl(body.xlsxUrl);
+    const meResponse = await fetch("/api/me", { cache: "no-store" });
+    const meBody = (await meResponse.json()) as MeResponse;
+    setMe(meBody.user);
   }
 
   return (
@@ -407,6 +415,11 @@ export function SciVisBench({
             <button type="button" onClick={() => void exportSheet()} className="border border-[var(--line)] bg-white px-3 py-2">
               {text.export}
             </button>
+            {exportUrl ? (
+              <a href={`/api/download-image?url=${encodeURIComponent(exportUrl)}`} className="border border-[var(--line)] bg-white px-3 py-2">
+                {text.download} xlsx
+              </a>
+            ) : null}
           </p>
           <label className="block space-y-1 text-sm">
             <span>{text.follow}</span>

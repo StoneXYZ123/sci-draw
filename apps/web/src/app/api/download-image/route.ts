@@ -13,6 +13,8 @@ const CONTENT_TYPES: Record<string, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   pdf: "application/pdf",
   tiff: "image/tiff",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  vsdx: "application/vnd.ms-visio.drawing",
 };
 
 export async function GET(request: Request) {

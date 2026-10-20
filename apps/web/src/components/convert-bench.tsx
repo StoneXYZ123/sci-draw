@@ -171,7 +171,7 @@ export function ConvertBench() {
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl">Convert a figure</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">Upload a PNG, JPEG, or WebP. SVG and PPTX come back in the same request. VSDX is not available in this release.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">Upload a PNG, JPEG, or WebP. SVG, PPTX, PNG, PDF, and TIFF come back in the same request. VSDX is a queued export: the development mock writes a package and charges 0; CloudConvert charges 20. Without a provider it stays unimplemented and does not charge.</p>
         </div>
         <p className="text-sm">Credits: {me ? me.creditsBalance : "—"}</p>
       </div>

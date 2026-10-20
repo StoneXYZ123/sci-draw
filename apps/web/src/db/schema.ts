@@ -144,6 +144,23 @@ export const uploadObject = pgTable(
   (table) => [index("upload_object_user_id_idx").on(table.userId)],
 );
 
+export const apiKey = pgTable(
+  "api_key",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("api_key_hash_uidx").on(table.keyHash), index("api_key_user_id_idx").on(table.userId)],
+);
+
 export const job = pgTable(
   "job",
   {

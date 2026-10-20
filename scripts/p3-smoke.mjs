@@ -199,8 +199,8 @@ async function main() {
     body: JSON.stringify({ generationId: result.generationId }),
   });
   const exportedBody = await readJson(exported);
-  assert.equal(exported.status, 501, JSON.stringify(exportedBody));
-  assert.equal(exportedBody.errorCode, "NOT_IMPLEMENTED");
+  assert.equal(exported.status, 402, JSON.stringify(exportedBody));
+  assert.equal(exportedBody.errorCode, "INSUFFICIENT_CREDITS");
   assert.equal(await balance(cookie), 0);
 
   const broke = await stream(cookie, { data: { objectKey, filename: "groups.csv" }, chartTypes: ["line"] });

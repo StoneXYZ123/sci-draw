@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { job } from "@/db/schema";
-import { getDb } from "@/db";
+import { InsufficientCreditsError } from "@/lib/credits";
 import { jsonNoStore } from "@/lib/http";
+import { IdempotencyConflictError, IdempotencyKeyError, readIdempotencyKey } from "@/lib/idempotency";
 import { takeRateLimit } from "@/lib/rate-limit";
+import { ExportRequestError, exportSciVisXlsx } from "@/lib/sci-vis-export";
 import { getSessionUser } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -31,19 +31,27 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return jsonNoStore({ error: "Invalid request" }, 400);
   }
-  const [row] = await getDb()
-    .select({ id: job.id })
-    .from(job)
-    .where(and(eq(job.id, parsed.data.generationId), eq(job.userId, sessionUser.id), eq(job.type, "sci_vis")))
-    .limit(1);
-  if (!row) {
-    return jsonNoStore({ error: "Chart was not found" }, 404);
+  try {
+    const exported = await exportSciVisXlsx({
+      userId: sessionUser.id,
+      generationId: parsed.data.generationId,
+      idempotencyKey: readIdempotencyKey(request),
+    });
+    return jsonNoStore(exported);
+  } catch (error) {
+    if (error instanceof IdempotencyKeyError) {
+      return jsonNoStore({ error: error.message, errorCode: error.errorCode }, 400);
+    }
+    if (error instanceof IdempotencyConflictError) {
+      return jsonNoStore({ error: error.message, errorCode: error.errorCode }, 409);
+    }
+    if (error instanceof ExportRequestError) {
+      return jsonNoStore({ error: error.message, ...(error.errorCode ? { errorCode: error.errorCode } : {}) }, error.status);
+    }
+    if (error instanceof InsufficientCreditsError) {
+      return jsonNoStore({ error: error.message, errorCode: error.errorCode }, 402);
+    }
+    console.error("xlsx export failed", error instanceof Error ? error.message : "unknown");
+    return jsonNoStore({ error: "Could not export the spreadsheet" }, 500);
   }
-  return jsonNoStore(
-    {
-      error: "Spreadsheet export is not available in this release",
-      errorCode: "NOT_IMPLEMENTED",
-    },
-    501,
-  );
 }

@@ -15,7 +15,7 @@ export const ASPECT_RATIOS = [
 
 export const RESOLUTIONS = ["2K", "4K"] as const;
 
-export const BATCH_COUNTS = [1, 2, 4, 8] as const;
+export const BATCH_COUNTS = [1, 2, 3, 4, 8] as const;
 
 export const DRAWING_MODES = ["prompt", "sketch", "replicate", "custom"] as const;
 
@@ -40,6 +40,7 @@ export const generateBodySchema = z.object({
   batchCount: z.union([
     z.literal(1),
     z.literal(2),
+    z.literal(3),
     z.literal(4),
     z.literal(8),
   ]).default(1),

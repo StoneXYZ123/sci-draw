@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 const HASH_SEGMENT = /^[a-f0-9]{64}$/;
-const FILE_SEGMENT = /^[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff)$/;
+const FILE_SEGMENT = /^[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff|xlsx|vsdx)$/;
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
@@ -18,6 +18,8 @@ const CONTENT_TYPES: Record<string, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   pdf: "application/pdf",
   tiff: "image/tiff",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  vsdx: "application/vnd.ms-visio.drawing",
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ path: string[] }> }) {

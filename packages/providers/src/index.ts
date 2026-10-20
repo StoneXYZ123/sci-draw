@@ -6,6 +6,8 @@ export { SciVisEngineError } from "./sci-vis/types";
 export type { ChartArtifact, ChartRequest, SciVisEngine, SciVisSandbox } from "./sci-vis/types";
 export { createConvertProvider, resolveConvertProviderId } from "./convert/factory";
 export type { ConvertProviderEnv, ConvertProviderId } from "./convert/factory";
+export { buildMockVsdx, convertImageToVsdx, resolveVsdxProviderMode, VsdxUnavailableError } from "./convert/vsdx";
+export type { VsdxProviderEnv, VsdxProviderMode } from "./convert/vsdx";
 export type { ConvertedFile, ConvertImageInput, ConvertProvider, RasterDpi, RasterFormat, SvgConvertMode } from "./convert/types";
 export { logicalImageSize, readImageSize } from "./image/dimensions";
 export { createImageProvider, resolveImageProviderId } from "./image/factory";

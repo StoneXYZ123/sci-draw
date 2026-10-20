@@ -51,6 +51,43 @@ async function spend<T>(userId: string, cost: number, run: () => Promise<T>): Pr
   }
 }
 
+export async function renderConvertedFile(input: {
+  userId: string;
+  bytes: Uint8Array;
+  mimeType: string;
+  target: ConvertTarget;
+}): Promise<{ url: string; credits: number; extension: string }> {
+  if (!input.mimeType.startsWith("image/")) {
+    throw new ConvertInputError("Choose a PNG, JPEG, or WebP image");
+  }
+  const cost = convertCredits(chargeFor(input.target));
+  const provider = createConvertProvider({ CONVERT_PROVIDER: process.env.CONVERT_PROVIDER });
+  const target = input.target;
+  const file = await (async () => {
+    switch (target.format) {
+      case "svg":
+        return provider.toSvg({ bytes: input.bytes, mimeType: input.mimeType, mode: target.mode });
+      case "pptx":
+        return provider.toPptx({ bytes: input.bytes, mimeType: input.mimeType });
+      case "png":
+      case "pdf":
+      case "tiff":
+        return provider.toRaster({ bytes: input.bytes, mimeType: input.mimeType, format: target.format, dpi: target.dpi });
+      default: {
+        const neverTarget: never = target;
+        throw new ConvertInputError(`Unsupported format ${String(neverTarget)}`);
+      }
+    }
+  })();
+  const stored = await persistUserFile({
+    userId: input.userId,
+    bytes: file.bytes,
+    mimeType: file.mimeType,
+    extension: file.extension,
+  });
+  return { url: stored.url, credits: cost, extension: file.extension };
+}
+
 export async function convertImageBytes(input: {
   userId: string;
   bytes: Uint8Array;
@@ -61,32 +98,9 @@ export async function convertImageBytes(input: {
     throw new ConvertInputError("Choose a PNG, JPEG, or WebP image");
   }
   const cost = convertCredits(chargeFor(input.target));
-  const provider = createConvertProvider({ CONVERT_PROVIDER: process.env.CONVERT_PROVIDER });
   return spend(input.userId, cost, async () => {
-    const target = input.target;
-    const file = await (async () => {
-      switch (target.format) {
-        case "svg":
-          return provider.toSvg({ bytes: input.bytes, mimeType: input.mimeType, mode: target.mode });
-        case "pptx":
-          return provider.toPptx({ bytes: input.bytes, mimeType: input.mimeType });
-        case "png":
-        case "pdf":
-        case "tiff":
-          return provider.toRaster({ bytes: input.bytes, mimeType: input.mimeType, format: target.format, dpi: target.dpi });
-        default: {
-          const neverTarget: never = target;
-          throw new ConvertInputError(`Unsupported format ${String(neverTarget)}`);
-        }
-      }
-    })();
-    const stored = await persistUserFile({
-      userId: input.userId,
-      bytes: file.bytes,
-      mimeType: file.mimeType,
-      extension: file.extension,
-    });
-    return { url: stored.url, creditsConsumed: cost, extension: file.extension };
+    const rendered = await renderConvertedFile(input);
+    return { url: rendered.url, creditsConsumed: rendered.credits, extension: rendered.extension };
   });
 }
 

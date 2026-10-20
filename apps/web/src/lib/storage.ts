@@ -6,8 +6,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const UPLOAD_KEY =
   /^(?:(?:ai-drawing-source|convert-source)\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}\.(?:png|jpeg|webp)|sci-vis-data\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}\.(?:csv|tsv|txt|xlsx|xls))$/;
-const RESULT_KEY = /^image-results\/[A-Za-z0-9_-]{1,128}\/[a-f0-9]{64}\/[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff)$/;
-const RESULT_EXTENSIONS = new Set(["png", "jpeg", "webp", "svg", "pptx", "pdf", "tiff"]);
+const RESULT_KEY = /^image-results\/[A-Za-z0-9_-]{1,128}\/[a-f0-9]{64}\/[0-9a-f-]{36}\.(png|jpe?g|webp|svg|pptx|pdf|tiff|xlsx|vsdx)$/;
+const RESULT_EXTENSIONS = new Set(["png", "jpeg", "webp", "svg", "pptx", "pdf", "tiff", "xlsx", "vsdx"]);
 
 export function appUrl(): string {
   return (process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -225,6 +225,27 @@ export async function persistUserFile(input: {
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, objectName), input.bytes);
   return { url: `${appUrl()}/api/media/${key}`, format: input.extension };
+}
+
+export async function writeUploadBytes(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+  if (!isUploadObjectKey(key)) {
+    throw new Error("Unsupported upload");
+  }
+  if (isR2Configured()) {
+    await getR2Client().send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: key,
+        Body: Buffer.from(bytes),
+        ContentType: contentType,
+      }),
+    );
+    return;
+  }
+  const wrote = await writePrivateObject(key, bytes);
+  if (!wrote) {
+    throw new Error("Unsupported upload");
+  }
 }
 
 export async function writePrivateObject(key: string, bytes: Uint8Array): Promise<boolean> {

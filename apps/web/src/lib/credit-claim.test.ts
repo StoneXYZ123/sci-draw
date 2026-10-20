@@ -5,7 +5,7 @@ import { LEDGER_REASONS } from "@sci-draw/credits";
 import { eq, inArray, sql } from "drizzle-orm";
 import { creditLedger, job, user } from "@/db/schema";
 import { getDb } from "@/db";
-import { confirmCredits, ensureSignupBonus, getBalance, reserveCreditsTx, rollbackCredits, signupBonusAmount } from "@/lib/credits";
+import { confirmCredits, ensureSignupBonus, getBalance, grantCredits, reserveCreditsTx, rollbackCredits, signupBonusAmount } from "@/lib/credits";
 import { claimJobCompleted, claimJobFailed } from "@/lib/job-claim";
 import { isUniqueViolation } from "@/lib/pg-error";
 
@@ -143,5 +143,20 @@ describe("ledger idempotency and job claims", () => {
     const [status] = await getDb().select({ status: job.status }).from(job).where(eq(job.id, jobId)).limit(1);
     assert.equal(status?.status, "completed");
     assert.equal(await reasonCount(jobId, LEDGER_REASONS.rollback), 0);
+  });
+
+  it("grants a stripe purchase once for the same session", async () => {
+    requireDatabase();
+    const userId = await insertUser();
+    const sessionId = `cs_test_${randomUUID()}`;
+    const [first, second] = await Promise.all([
+      grantCredits(userId, 100, LEDGER_REASONS.purchaseStripe, sessionId, "stripe_checkout"),
+      grantCredits(userId, 100, LEDGER_REASONS.purchaseStripe, sessionId, "stripe_checkout"),
+    ]);
+    await grantCredits(userId, 100, LEDGER_REASONS.purchaseStripe, sessionId, "stripe_checkout");
+    const applied = [first, second].filter((item) => item === "applied");
+    assert.equal(applied.length, 1);
+    assert.equal(await getBalance(userId), 100);
+    assert.equal(await reasonCount(sessionId, LEDGER_REASONS.purchaseStripe), 1);
   });
 });
