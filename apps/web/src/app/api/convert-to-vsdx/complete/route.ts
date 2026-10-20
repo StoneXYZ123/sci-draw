@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return jsonNoStore({ error: "VSDX export is still running", errorCode: "JOB_PENDING" }, 409);
   }
   if (row.status === "completed" && row.vsdxUrl) {
-    return jsonNoStore({ jobId: row.jobId, vsdxUrl: row.vsdxUrl, creditsConsumed: row.creditsConsumed ?? 20 });
+    return jsonNoStore({ jobId: row.jobId, vsdxUrl: row.vsdxUrl, creditsConsumed: row.creditsConsumed ?? 0 });
   }
   if (row.errorCode === VSDX_CODE) {
     return jsonNoStore({ error: row.error ?? VSDX_ERROR, errorCode: VSDX_CODE }, 501);

@@ -100,6 +100,7 @@ paths:
       description: |
         `Prefer: wait` runs the short conversion in the request.
         `format=vsdx` needs `CONVERT_VSDX_PROVIDER`. Without it the route returns 501 and does not charge.
+        `mock` writes a development package and charges 0. `cloudconvert` charges 20.
       security:
         - bearerAuth: []
       parameters:

@@ -313,8 +313,13 @@ async function main() {
   assert.equal(await balance(vsdxUser), 20);
 
   const packs = await readJson(await fetch(`${baseUrl}/api/billing/packs`));
-  assert.equal(packs.configured, false);
+  assert.equal(Object.hasOwn(packs, "configured"), false);
   assert.equal(packs.packs.length, 3);
+  assert.deepEqual(
+    packs.packs.map((pack) => pack.credits),
+    [100, 500, 2000],
+  );
+  assert.equal(packs.packs.every((pack) => !Object.hasOwn(pack, "available")), true);
   const checkout = await fetch(`${baseUrl}/api/billing/checkout`, {
     method: "POST",
     headers: jsonHeaders(apiUser),

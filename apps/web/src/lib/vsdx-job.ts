@@ -22,11 +22,30 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
-export function vsdxProviderConfigured(): boolean {
+function currentVsdxMode() {
   return resolveVsdxProviderMode({
     CONVERT_VSDX_PROVIDER: process.env.CONVERT_VSDX_PROVIDER,
     CLOUDCONVERT_API_KEY: process.env.CLOUDCONVERT_API_KEY,
-  }) !== "unavailable";
+  });
+}
+
+export function vsdxProviderConfigured(): boolean {
+  return currentVsdxMode() !== "unavailable";
+}
+
+export function vsdxJobCredits(): number {
+  const mode = currentVsdxMode();
+  switch (mode) {
+    case "cloudconvert":
+      return convertCredits({ kind: "vsdx" });
+    case "mock":
+    case "unavailable":
+      return 0;
+    default: {
+      const neverMode: never = mode;
+      return neverMode;
+    }
+  }
 }
 
 export async function recordVsdxUnavailable(userId: string, request: unknown) {
@@ -89,7 +108,7 @@ export async function startVsdxJob(input: {
     type: "convert_vsdx",
     batchId: input.batchId,
     request: input.request,
-    credits: convertCredits({ kind: "vsdx" }),
+    credits: vsdxJobCredits(),
     reserveReason: reserveReason(family),
   });
 }

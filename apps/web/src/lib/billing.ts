@@ -4,9 +4,9 @@ import { grantCredits } from "@/lib/credits";
 import { appUrl } from "@/lib/storage";
 
 export const CREDIT_PACKS = [
-  { id: "credits_100", credits: 100, env: "STRIPE_PRICE_100" },
-  { id: "credits_500", credits: 500, env: "STRIPE_PRICE_500" },
-  { id: "credits_2000", credits: 2000, env: "STRIPE_PRICE_2000" },
+  { id: "credits_100", credits: 100, env: "STRIPE_PRICE_100", amountEnv: "STRIPE_AMOUNT_CENTS_100", defaultAmountCents: 500 },
+  { id: "credits_500", credits: 500, env: "STRIPE_PRICE_500", amountEnv: "STRIPE_AMOUNT_CENTS_500", defaultAmountCents: 2000 },
+  { id: "credits_2000", credits: 2000, env: "STRIPE_PRICE_2000", amountEnv: "STRIPE_AMOUNT_CENTS_2000", defaultAmountCents: 8000 },
 ] as const;
 
 export type CreditPackId = (typeof CREDIT_PACKS)[number]["id"];
@@ -32,15 +32,41 @@ function priceIdFor(packId: CreditPackId): string {
   return process.env[pack.env]?.trim() ?? "";
 }
 
-export function listCreditPacks(): { configured: boolean; packs: Array<{ id: CreditPackId; credits: number; available: boolean }> } {
-  const secret = stripeSecret();
+export function expectedAmountCents(packId: CreditPackId): number {
+  const pack = CREDIT_PACKS.find((item) => item.id === packId);
+  if (!pack) {
+    throw new BillingConfigError();
+  }
+  const raw = process.env[pack.amountEnv]?.trim();
+  if (!raw) {
+    return pack.defaultAmountCents;
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new BillingConfigError();
+  }
+  return parsed;
+}
+
+export function listCreditPacks(): { packs: Array<{ id: CreditPackId; credits: number }> } {
   return {
-    configured: Boolean(secret),
     packs: CREDIT_PACKS.map((pack) => ({
       id: pack.id,
       credits: pack.credits,
-      available: Boolean(secret && priceIdFor(pack.id)),
     })),
+  };
+}
+
+export function checkoutMetadata(userId: string, packId: CreditPackId): { userId: string; pack: CreditPackId; credits: string; expectedAmountTotal: string } {
+  const credits = creditsForPack(packId);
+  if (!credits) {
+    throw new BillingConfigError();
+  }
+  return {
+    userId,
+    pack: packId,
+    credits: String(credits),
+    expectedAmountTotal: String(expectedAmountCents(packId)),
   };
 }
 
@@ -58,10 +84,7 @@ export async function createCheckout(input: { userId: string; packId: CreditPack
   if (!secret || !price) {
     throw new BillingConfigError();
   }
-  const credits = creditsForPack(input.packId);
-  if (!credits) {
-    throw new BillingConfigError();
-  }
+  const metadata = checkoutMetadata(input.userId, input.packId);
   const session = await stripeClient().checkout.sessions.create(
     {
       mode: "payment",
@@ -69,11 +92,7 @@ export async function createCheckout(input: { userId: string; packId: CreditPack
       success_url: `${appUrl()}/billing?checkout=success`,
       cancel_url: `${appUrl()}/billing?checkout=cancel`,
       line_items: [{ price, quantity: 1 }],
-      metadata: {
-        userId: input.userId,
-        pack: input.packId,
-        credits: String(credits),
-      },
+      metadata,
     },
     input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
   );
@@ -100,6 +119,17 @@ export function constructStripeEvent(rawBody: string, signature: string): Stripe
   return stripeClient().webhooks.constructEvent(rawBody, signature, secret);
 }
 
+function paidAmountMatches(session: Stripe.Checkout.Session): boolean {
+  // Missing expectedAmountTotal is ignored in every environment, including production.
+  // A cheaper Price bound to a pack must not grant that pack's credits.
+  const raw = session.metadata?.expectedAmountTotal;
+  if (raw === undefined || raw === "") {
+    return false;
+  }
+  const expected = Number(raw);
+  return Number.isSafeInteger(expected) && expected > 0 && session.amount_total === expected;
+}
+
 export async function applyCheckoutSession(session: Stripe.Checkout.Session): Promise<"applied" | "duplicate" | "ignored"> {
   if (session.mode !== "payment" || session.payment_status !== "paid") {
     return "ignored";
@@ -120,6 +150,14 @@ export async function applyCheckoutSession(session: Stripe.Checkout.Session): Pr
     return "ignored";
   }
   if (!session.id) {
+    return "ignored";
+  }
+  if (!paidAmountMatches(session)) {
+    console.warn("stripe checkout ignored: amount_total does not match expectedAmountTotal", {
+      sessionId: session.id,
+      expectedAmountTotal: session.metadata?.expectedAmountTotal ?? null,
+      amountTotal: session.amount_total,
+    });
     return "ignored";
   }
   try {

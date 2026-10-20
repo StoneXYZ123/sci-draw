@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-type Pack = { id: string; credits: number; available: boolean };
+type Pack = { id: string; credits: number };
 type MeResponse = {
   user: { id: string; email: string; name: string; creditsBalance: number } | null;
 };
@@ -15,7 +15,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function BillingPanel({ checkout }: { checkout?: string }) {
   const [me, setMe] = useState<MeResponse["user"] | undefined>(undefined);
   const [packs, setPacks] = useState<Pack[]>([]);
-  const [configured, setConfigured] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -27,7 +26,6 @@ export function BillingPanel({ checkout }: { checkout?: string }) {
       const packBody: unknown = await packResponse.json();
       if (isRecord(packBody) && Array.isArray(packBody.packs)) {
         setPacks(packBody.packs as Pack[]);
-        setConfigured(packBody.configured === true);
       }
     })();
   }, []);
@@ -58,19 +56,18 @@ export function BillingPanel({ checkout }: { checkout?: string }) {
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl">Buy credits</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">Checkout is handled by Stripe in test or live mode. Credits are added only after the signed webhook records the payment.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">Stripe test keys only. This server is a single Node process, and after() is not a durable queue. Do not use live keys until a queue exists. Credits are added only after the signed webhook records a payment whose amount matches the pack.</p>
         </div>
         <p className="text-sm">Credits: {me ? me.creditsBalance : "—"}</p>
       </div>
       {checkout === "success" ? <p className="text-sm">Payment submitted. The balance updates when the webhook arrives.</p> : null}
       {checkout === "cancel" ? <p className="text-sm">Checkout was canceled. No credits were added.</p> : null}
-      {!configured ? <p className="text-sm text-[var(--muted)]">Payments are not configured on this server.</p> : null}
       {me === undefined ? null : me ? (
         <ul className="space-y-2">
           {packs.map((pack) => (
             <li key={pack.id} className="flex items-center justify-between border border-[var(--line)] bg-white px-3 py-3 text-sm">
               <span>{pack.credits} credits</span>
-              <button type="button" disabled={!pack.available || busy === pack.id} onClick={() => void buy(pack.id)} className="bg-[var(--accent)] px-3 py-2 text-[var(--accent-ink)] disabled:opacity-60">
+              <button type="button" disabled={busy === pack.id} onClick={() => void buy(pack.id)} className="bg-[var(--accent)] px-3 py-2 text-[var(--accent-ink)] disabled:opacity-60">
                 {busy === pack.id ? "Redirecting" : "Buy"}
               </button>
             </li>

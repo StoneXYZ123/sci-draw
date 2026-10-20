@@ -35,7 +35,7 @@
   - `POST /api/convert-to-pptx` 同步，返回 `pptxUrl`
   - `POST /api/convert-format` 给 `/convert` 页使用：`objectKey`、`filename`、`format`（svg / pptx / png / pdf / tiff）、可选 `mode` 与 `dpi`，返回 `downloadUrl`
   - `GET /api/download-image?url=` 只代理当前用户自己的结果文件，并带下载头
-  - `POST /api/convert-to-vsdx`：未配置 `CONVERT_VSDX_PROVIDER`（或 `cloudconvert` 但没有 `CLOUDCONVERT_API_KEY`）时仍写入一条失败任务并返回 **202**，`POST /api/convert-to-vsdx/complete` 返回 **501** `NOT_IMPLEMENTED`，不扣积分。设为 `mock` 时在进程内写出一个 VSDX 压缩包并扣 **20**；设为 `cloudconvert` 且有密钥时把图交给 CloudConvert，成功后 `complete` 返回 `vsdxUrl`。失败会回滚预留。这一步用和出图相同的进程内 `after()`，没有另接 Inngest：单进程里轮询即可结束，多实例持久队列仍不在这一版
+  - `POST /api/convert-to-vsdx`：未配置 `CONVERT_VSDX_PROVIDER`（或 `cloudconvert` 但没有 `CLOUDCONVERT_API_KEY`）时仍写入一条失败任务并返回 **202**，`POST /api/convert-to-vsdx/complete` 返回 **501** `NOT_IMPLEMENTED`，不扣积分。设为 `mock` 时在进程内写出一个开发用 VSDX 压缩包，**不扣积分**；设为 `cloudconvert` 且有密钥时把图交给 CloudConvert 并扣 **20**，成功后 `complete` 返回 `vsdxUrl`。失败会回滚预留。这一步用和出图相同的进程内 `after()`，没有另接 Inngest：单进程里轮询即可结束，多实例持久队列仍不在这一版
 - 源图用途增加 `convert-source`，仍然走 presign → PUT → complete。没有 R2 时落到本地签名地址
 - 路径描摹用 potrace 的 JavaScript 移植（GPL-2.0）。`text-only` 是文字层占位，这一版没有接 OCR。PPTX 用 pptxgenjs。PNG / TIFF 用 sharp，PDF 把 sharp 产出的 PNG 包进单页 PDF
 
@@ -46,7 +46,7 @@
 | 绘图 2K / 4K，再乘张数 | 5 / 10 |
 | SVG text-only / full | 10 / 15 |
 | PPTX | 10 |
-| VSDX（未配置提供方时不扣；配置后扣） | 20 |
+| VSDX（未配置或 mock 不扣；仅 cloudconvert 扣） | 0 / 20 |
 | PNG、PDF、TIFF，300 / 600 / 1000 DPI | 5 / 10 / 15 |
 | SciVis 作图 / 接着改 | 10 / 10 |
 | SciVis 表格导出 | 10 |
@@ -65,7 +65,7 @@
 | GET | `/api/v1/credits` | `{ "balance": n }` |
 | POST | `/api/v1/images/generations` | JSON：`prompt`、`aspect_ratio`、`resolution`、`count`（1–4）。2K 为 5×count，4K 为 10×count |
 | POST | `/api/v1/images/edits` | multipart：`image` + `prompt`，按草图编辑计价 |
-| POST | `/api/v1/images/conversions` | multipart：`image`、`format`、`vector_mode`、`dpi`。`Prefer: wait` 会在这次请求里等短任务结束。`vsdx` 在提供方未配置时返回 **501**，不扣费 |
+| POST | `/api/v1/images/conversions` | multipart：`image`、`format`、`vector_mode`、`dpi`。`Prefer: wait` 会在这次请求里等短任务结束。`vsdx` 未配置时 **501** 且不扣费；`mock` 不扣费；`cloudconvert` 扣 20 |
 | POST | `/api/v1/charts/generations` | multipart CSV。成功结果只有图片 URL，**没有** `code` |
 | GET | `/api/v1/jobs/{job_id}` | `queued` / `processing` / `succeeded` / `failed` / `canceled` |
 
@@ -75,11 +75,13 @@
 
 ## 购买积分
 
-`/billing` 列出 100、500、2000 三档。`POST /api/billing/checkout` 创建 Stripe Checkout Session。`POST /api/billing/webhook` 校验 `Stripe-Signature`，在 `checkout.session.completed` 且已支付时按价目入账。`ref_id` 是 Checkout Session id，`reason` 是 `purchase.stripe`，重复事件不会加第二次。密钥未配置时结账返回 **503**，不会改余额。
+`/billing` 列出 100、500、2000 三档（`GET /api/billing/packs` 只返回 `id` 和 `credits`）。`POST /api/billing/checkout` 创建 Stripe Checkout Session，并在 metadata 写入 `expectedAmountTotal`（分）。`POST /api/billing/webhook` 校验 `Stripe-Signature`，在 `checkout.session.completed` 且已支付、并且 `amount_total` 等于该期望金额时按价目入账。金额不一致或缺少期望金额时忽略，不入账。`ref_id` 是 Checkout Session id，`reason` 是 `purchase.stripe`，重复事件不会加第二次。密钥未配置时结账返回 **503**，不会改余额。
+
+只使用 Stripe **测试**密钥（`sk_test_`、`whsec_`）。这一版是单 Node，`after()` 不是可恢复队列。在有持久队列之前不要配置 live key。
 
 ## VSDX
 
-`CONVERT_VSDX_PROVIDER` 为空时保持上面的不扣费占位，方便没有厂商账号的环境。`mock` 生成的包能走通下载和扣费，不保证每一版 Visio 都能打开。`cloudconvert` 才是交给外部转换器的路径；没有 `CLOUDCONVERT_API_KEY` 时仍走不扣费占位。没有引入 Inngest：转换和轮询都留在当前进程的 `after()` 里，和出图任务同一限制。
+`CONVERT_VSDX_PROVIDER` 为空时保持上面的不扣费占位，方便没有厂商账号的环境。`mock` 生成的包能走通下载，**不扣积分**，也不保证 Visio 能打开。`cloudconvert` 才扣 **20** 并交给外部转换器；没有 `CLOUDCONVERT_API_KEY` 时仍走不扣费占位。没有引入 Inngest：转换和轮询都留在当前进程的 `after()` 里，和出图任务同一限制。
 
 ## 本地启动
 
@@ -146,6 +148,9 @@ node scripts/p4-smoke.mjs
 
 ## 已知限制
 
+- 这一版按**单 Node** 演示运行。出图、公开转换、作图和 VSDX 都由请求进程里的 Next.js `after()` 执行。进程退出、重新部署或崩溃后任务不会继续。`after()` 不是生产可恢复队列。在有持久队列之前，Stripe 只用测试密钥，不要把 `sk_live_` 写进环境变量。
+- `/api/media/...` 的结果地址等于下载能力。路径含用户 id 和随机段，但**没有**登录校验：知道 URL 就能取文件，包括 xlsx 和 vsdx。不要把结果地址发到公开渠道。签名 URL 或按登录鉴权是后续工作，这一版没有做。
+- 限流是进程内 `Map`，多副本时每台机器各算各的。公开 `sd_` 在多实例上线前需要 Redis 或 Upstash 替换 `takeRateLimit`。这一版不接入 Redis。
 - 出图任务由 `POST /api/ai-drawing/generate` 里的 Next.js `after()` 在当前进程执行。进程退出、重新部署或崩溃后，任务不会继续，也没有跨实例的持久队列。
 - 轮询时，`running` 超过 6 分钟（`STALE_MS`）会走失败认领：只有 `UPDATE … WHERE status IN ('pending','running')` 抢到行，才会把任务标为 `failed` 并退回预留积分。成功路径先抢 `completed`（仅 `status = 'running'`），抢到之后才记消耗。SciVis 的 SSE 用同一套认领。
 - 积分账本对 `(ref_id, reason)` 在 `ref_id IS NOT NULL` 时唯一，注册赠送另有 `reason = 'signup_bonus'` 的用户唯一索引。并发确认、回滚或赠送撞上 Postgres `23505` 时当作已经记过，不再改余额。
@@ -154,4 +159,4 @@ node scripts/p4-smoke.mjs
 
 ## 之后不做在这一版里的事
 
-OAuth、像素级复刻现有产品界面、MCP、出版证书，都不在范围内。多实例任务队列也还没有接。
+OAuth、像素级复刻现有产品界面、MCP、出版证书，都不在范围内。多实例任务队列也还没有接。上线前的手工检查见 `docs/go-live-checklist.md`。
